@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>動画アップロード管理 | Secret Viewer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#14b8a6;
+    --accent-teal-dark:#0d9488;
+  }
+  html,body{
+    background:#f4f7fa;
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #e7edf3;
+    box-shadow:0 4px 20px rgba(15,45,60,0.06);
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 6px 16px rgba(20,184,166,0.35);
+    transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+  }
+  .btn-primary:active{ transform:scale(0.98); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
+  .progress-bar-inner{
+    transition:width 0.15s linear;
+    background:linear-gradient(90deg,var(--accent-teal),var(--accent-teal-dark));
+  }
+</style>
+</head>
+<body class="min-h-screen w-full flex items-center justify-center p-4">
+
+<div class="w-full max-w-md mx-auto flex flex-col gap-5 py-8">
+
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">動画アップロード管理</h1>
+    <p class="text-xs text-slate-400 mt-1">アップロードした動画ごとに個別のURLが発行されます。視聴ページに ?v=動画ID を付けると、その動画がアンロック後に表示されます（省略時は最新の動画）。</p>
+  </div>
+
+  <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">パスフレーズ</span>
+      <input type="password" name="passphrase" required
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">動画ファイル（mp4 / webm / mov / m4v）</span>
+      <input type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
+        class="text-sm" />
+    </label>
+
+    <button type="submit" id="submitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      アップロード（新規URLを発行）
+    </button>
+
+    <div id="progressWrap" class="hidden flex flex-col gap-1">
+      <div class="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+        <div id="progressBar" class="progress-bar-inner h-full" style="width:0%"></div>
+      </div>
+      <span id="progressText" class="text-xs text-slate-400">0%</span>
+    </div>
+
+    <p id="resultMsg" class="text-sm"></p>
+  </form>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">アップロード済み動画</h2>
+    <p class="text-xs text-slate-400 mt-1">動画ごとのシェア用リンクです。削除にはパスフレーズが必要です。</p>
+  </div>
+
+  <div id="videoListBox" class="flex flex-col gap-3">
+    <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
+  </div>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">プレミアムリンク設定</h2>
+    <p class="text-xs text-slate-400 mt-1">アンロック後に表示される誘導ボタンのリンク先です。</p>
+  </div>
+
+  <div id="linkStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
+    現在の状態を確認しています…
+  </div>
+
+  <form id="linkForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">パスフレーズ</span>
+      <input type="password" name="passphrase" required
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">リンクURL（https://...）</span>
+      <input type="url" name="url" required placeholder="https://fantia.jp/..."
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <button type="submit" id="linkSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      リンクを更新
+    </button>
+
+    <p id="linkResultMsg" class="text-sm"></p>
+  </form>
+</div>
+
+<script>
+(function () {
+  const uploadForm  = document.getElementById('uploadForm');
+  const submitBtn   = document.getElementById('submitBtn');
+  const progressWrap= document.getElementById('progressWrap');
+  const progressBar = document.getElementById('progressBar');
+  const progressText= document.getElementById('progressText');
+  const resultMsg   = document.getElementById('resultMsg');
+  const videoListBox= document.getElementById('videoListBox');
+
+  const linkStatusBox = document.getElementById('linkStatusBox');
+  const linkForm      = document.getElementById('linkForm');
+  const linkSubmitBtn = document.getElementById('linkSubmitBtn');
+  const linkResultMsg = document.getElementById('linkResultMsg');
+
+  refreshVideoList();
+  refreshLinkStatus();
+
+  function refreshLinkStatus() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        linkStatusBox.textContent = `現在のリンク: ${data.premiumLink}`;
+      })
+      .catch(() => {
+        linkStatusBox.textContent = '状態の取得に失敗しました。';
+      });
+  }
+
+  linkForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    linkResultMsg.textContent = '';
+    linkResultMsg.className = 'text-sm';
+    linkSubmitBtn.disabled = true;
+
+    const formData = new FormData(linkForm);
+
+    fetch('/api/set-premium-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        passphrase: formData.get('passphrase'),
+        url: formData.get('url'),
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        linkSubmitBtn.disabled = false;
+        if (status === 200 && data.ok) {
+          linkResultMsg.textContent = `更新しました: ${data.premiumLink}`;
+          linkResultMsg.classList.add('text-teal-600');
+          refreshLinkStatus();
+        } else {
+          linkResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          linkResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        linkSubmitBtn.disabled = false;
+        linkResultMsg.textContent = '通信エラーが発生しました。';
+        linkResultMsg.classList.add('text-rose-500');
+      });
+  });
+
+  function refreshVideoList() {
+    fetch('/api/videos', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((videos) => {
+        if (!videos.length) {
+          videoListBox.innerHTML =
+            '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ動画がアップロードされていません。</div>';
+          return;
+        }
+        videoListBox.innerHTML = '';
+        videos.forEach((video) => {
+          videoListBox.appendChild(buildVideoCard(video));
+        });
+      })
+      .catch(() => {
+        videoListBox.innerHTML =
+          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+      });
+  }
+
+  function buildVideoCard(video) {
+    const shareUrl = location.origin + '/?v=' + encodeURIComponent(video.id);
+
+    const card = document.createElement('div');
+    card.className = 'card rounded-2xl p-4 flex flex-col gap-2';
+
+    const title = document.createElement('p');
+    title.className = 'text-sm font-medium text-slate-700 break-all';
+    title.textContent = video.originalFilename;
+    card.appendChild(title);
+
+    const meta = document.createElement('p');
+    meta.className = 'text-xs text-slate-400';
+    meta.textContent = 'アップロード日時: ' + video.uploadedAt;
+    card.appendChild(meta);
+
+    const linkRow = document.createElement('div');
+    linkRow.className = 'flex gap-2';
+
+    const linkInput = document.createElement('input');
+    linkInput.type = 'text';
+    linkInput.readOnly = true;
+    linkInput.value = shareUrl;
+    linkInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-600 bg-slate-50';
+    linkRow.appendChild(linkInput);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = 'コピー';
+    copyBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        copyBtn.textContent = 'コピー済み';
+        setTimeout(() => { copyBtn.textContent = 'コピー'; }, 1500);
+      });
+    });
+    linkRow.appendChild(copyBtn);
+
+    card.appendChild(linkRow);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = '削除';
+    deleteBtn.className = 'self-start text-xs font-medium text-rose-500 hover:text-rose-600 mt-1';
+    deleteBtn.addEventListener('click', () => {
+      const passphrase = window.prompt('削除にはパスフレーズが必要です');
+      if (passphrase === null) return;
+
+      fetch('/api/videos/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passphrase, id: video.id }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            alert('削除に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          alert('通信エラーが発生しました。');
+        });
+    });
+    card.appendChild(deleteBtn);
+
+    return card;
+  }
+
+  uploadForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    resultMsg.textContent = '';
+    resultMsg.className = 'text-sm';
+
+    const formData = new FormData(uploadForm);
+    const xhr = new XMLHttpRequest();
+
+    xhr.open('POST', '/api/upload');
+
+    xhr.upload.addEventListener('progress', function (evt) {
+      if (!evt.lengthComputable) return;
+      const pct = Math.round((evt.loaded / evt.total) * 100);
+      progressWrap.classList.remove('hidden');
+      progressBar.style.width = pct + '%';
+      progressText.textContent = pct + '%';
+    });
+
+    xhr.addEventListener('load', function () {
+      submitBtn.disabled = false;
+      let data;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch (err) {
+        data = { ok: false };
+      }
+
+      if (xhr.status === 200 && data.ok) {
+        const shareUrl = location.origin + '/?v=' + encodeURIComponent(data.id);
+        resultMsg.textContent = `アップロード完了: ${data.originalFilename}（リンク: ${shareUrl}）`;
+        resultMsg.classList.add('text-teal-600');
+        uploadForm.reset();
+        refreshVideoList();
+      } else {
+        resultMsg.textContent = 'アップロードに失敗しました（' + (data.error || xhr.status) + '）';
+        resultMsg.classList.add('text-rose-500');
+      }
+    });
+
+    xhr.addEventListener('error', function () {
+      submitBtn.disabled = false;
+      resultMsg.textContent = '通信エラーが発生しました。';
+      resultMsg.classList.add('text-rose-500');
+    });
+
+    submitBtn.disabled = true;
+    xhr.send(formData);
+  });
+})();
+</script>
+
+</body>
+</html>

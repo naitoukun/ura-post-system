@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: secret-viewer
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      # Renderのダッシュボードで値を入力する（リポジトリには保存されない）
+      - key: UPLOAD_PASSPHRASE
+        sync: false
+      - key: UPLOAD_DIR
+        value: /var/data
+    disks:
+      - name: secret-viewer-data
+        mountPath: /var/data
+        sizeGB: 5

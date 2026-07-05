@@ -462,7 +462,9 @@ class Handler(BaseHTTPRequestHandler):
         if requested_id:
             video = next((v for v in videos_list if v["id"] == requested_id), None)
             if not video or not video_file_path(video):
-                self.respond_json(200, {"exists": False})
+                # 削除済み・存在しないIDへのアクセスは「期限切れ」と同じ画面に統一する。
+                # (手動削除なのか自然に24時間経過したのかを外部から区別させないため)
+                self.respond_json(200, {"exists": True, "expired": True})
                 return
         else:
             videos_sorted = sorted(videos_list, key=lambda v: v["uploaded_at"], reverse=True)

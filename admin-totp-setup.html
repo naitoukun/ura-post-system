@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2段階認証セットアップ | Secret Viewer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#14b8a6;
+    --accent-teal-dark:#0d9488;
+  }
+  html,body{
+    background:#f4f7fa;
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #e7edf3;
+    box-shadow:0 4px 20px rgba(15,45,60,0.06);
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 6px 16px rgba(20,184,166,0.35);
+  }
+  .btn-primary:active{ transform:scale(0.98); }
+</style>
+</head>
+<body class="min-h-screen w-full flex items-center justify-center p-4">
+
+<div class="w-full max-w-sm mx-auto flex flex-col gap-5 py-8">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">2段階認証セットアップ</h1>
+    <p class="text-xs text-slate-400 mt-1">
+      このページはサーバーには何も送信しません。入力した値をこのブラウザの中だけでQRコードに変換するツールです。
+      表示されたQRコードをGoogle Authenticator等でスキャンしてください。
+    </p>
+  </div>
+
+  <form id="setupForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">ラベル（認証アプリでの表示名）</span>
+      <input type="text" name="label" value="Secret Viewer Admin" required
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">Base32シークレット</span>
+      <input type="text" name="secret" required placeholder="例: TJDQASOBWIOD5I27"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <button type="submit" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      QRコードを表示
+    </button>
+  </form>
+
+  <div id="resultBox" class="hidden card rounded-2xl p-4 flex flex-col items-center gap-3">
+    <div id="qrcode"></div>
+    <p class="text-xs text-slate-400 text-center">
+      読み取れない場合は、認証アプリの「セットアップキーを手動入力」から<br>
+      下のシークレットを直接入力してください。
+    </p>
+    <p id="secretText" class="text-xs font-mono bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 break-all"></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  const setupForm = document.getElementById('setupForm');
+  const resultBox = document.getElementById('resultBox');
+  const qrcodeEl  = document.getElementById('qrcode');
+  const secretText= document.getElementById('secretText');
+
+  setupForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    const formData = new FormData(setupForm);
+    const label = (formData.get('label') || '').trim();
+    // Base32はスペース区切りで書かれることもあるため、表示用の空白を取り除く
+    const secret = (formData.get('secret') || '').replace(/\s+/g, '').toUpperCase();
+
+    const issuer = 'SecretViewer';
+    const otpauthUrl =
+      'otpauth://totp/' + encodeURIComponent(issuer) + ':' + encodeURIComponent(label) +
+      '?secret=' + encodeURIComponent(secret) +
+      '&issuer=' + encodeURIComponent(issuer) +
+      '&algorithm=SHA1&digits=6&period=30';
+
+    qrcodeEl.innerHTML = '';
+    new QRCode(qrcodeEl, {
+      text: otpauthUrl,
+      width: 200,
+      height: 200,
+    });
+
+    secretText.textContent = secret;
+    resultBox.classList.remove('hidden');
+  });
+})();
+</script>
+
+</body>
+</html>

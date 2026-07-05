@@ -39,22 +39,26 @@
 
 <div class="w-full max-w-md mx-auto flex flex-col gap-5 py-8">
 
-  <div>
-    <h1 class="text-xl font-bold text-slate-800">動画アップロード管理</h1>
-    <p class="text-xs text-slate-400 mt-1">アップロードした動画ごとに個別のURLが発行されます。視聴ページに ?v=動画ID を付けると、その動画がアンロック後に表示されます（省略時は最新の動画）。</p>
+  <div class="flex items-start justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-slate-800">動画アップロード管理</h1>
+      <p class="text-xs text-slate-400 mt-1">アップロードした動画ごとに個別のURLが発行されます。視聴ページに ?v=動画ID を付けると、その動画がアンロック後に表示されます（省略時は最新の動画）。</p>
+    </div>
+    <button id="logoutBtn" type="button" class="shrink-0 text-xs font-medium text-slate-400 hover:text-slate-600 underline">
+      ログアウト
+    </button>
   </div>
 
   <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">パスフレーズ</span>
-      <input type="password" name="passphrase" required
-        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-    </label>
-
-    <label class="flex flex-col gap-1">
       <span class="text-sm font-medium text-slate-700">動画ファイル（mp4 / webm / mov / m4v）</span>
       <input type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
         class="text-sm" />
+    </label>
+
+    <label class="flex items-center gap-2">
+      <input type="checkbox" name="timeLimitEnabled" class="w-4 h-4" />
+      <span class="text-sm text-slate-700">初回アクセスから24時間限定にする</span>
     </label>
 
     <button type="submit" id="submitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
@@ -73,7 +77,7 @@
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">アップロード済み動画</h2>
-    <p class="text-xs text-slate-400 mt-1">動画ごとのシェア用リンクです。削除にはパスフレーズが必要です。</p>
+    <p class="text-xs text-slate-400 mt-1">動画ごとのシェア用リンクです。</p>
   </div>
 
   <div id="videoListBox" class="flex flex-col gap-3">
@@ -82,7 +86,7 @@
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">プレミアムリンク設定</h2>
-    <p class="text-xs text-slate-400 mt-1">アンロック後に表示される誘導ボタンのリンク先です。</p>
+    <p class="text-xs text-slate-400 mt-1">アンロック後に表示される誘導ボタンのリンク先と文字です。</p>
   </div>
 
   <div id="linkStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
@@ -91,22 +95,77 @@
 
   <form id="linkForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">パスフレーズ</span>
-      <input type="password" name="passphrase" required
-        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-    </label>
-
-    <label class="flex flex-col gap-1">
       <span class="text-sm font-medium text-slate-700">リンクURL（https://...）</span>
       <input type="url" name="url" required placeholder="https://fantia.jp/..."
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
 
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">ボタンの文字（60文字まで）</span>
+      <input type="text" name="buttonText" required maxlength="60" placeholder="続きをプレミアム会場（Fantia）で見る"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
     <button type="submit" id="linkSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
-      リンクを更新
+      更新
     </button>
 
     <p id="linkResultMsg" class="text-sm"></p>
+  </form>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">広告A/B設定（既定）</h2>
+    <p class="text-xs text-slate-400 mt-1">個別設定の無い動画に使われる、サイト全体の既定の広告と比率です（実際の広告SDKは未接続のため、広告コード欄は将来の実装用のメモです）。動画ごとに変えたい場合は、上の「アップロード済み動画」一覧から個別設定できます。</p>
+  </div>
+
+  <div id="adsStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
+    現在の状態を確認しています…
+  </div>
+
+  <form id="adsForm" class="card rounded-2xl p-4 flex flex-col gap-5">
+    <div class="flex flex-col gap-3 border border-slate-100 rounded-xl p-3">
+      <span class="text-xs font-bold text-slate-500">広告A</span>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">ラベル</span>
+        <input type="text" name="ad1Label" required maxlength="40" placeholder="広告A"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">広告コード（任意・将来のSDK用メモ）</span>
+        <input type="text" name="ad1Code" maxlength="2000" placeholder="例: i-mobileのスポットIDなど"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">表示比率（%）</span>
+        <input type="number" name="ad1Weight" required min="0" max="100" step="1" placeholder="70"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+    </div>
+
+    <div class="flex flex-col gap-3 border border-slate-100 rounded-xl p-3">
+      <span class="text-xs font-bold text-slate-500">広告B</span>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">ラベル</span>
+        <input type="text" name="ad2Label" required maxlength="40" placeholder="広告B"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">広告コード（任意・将来のSDK用メモ）</span>
+        <input type="text" name="ad2Code" maxlength="2000" placeholder="例: i-mobileのスポットIDなど"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">表示比率（%）</span>
+        <input type="number" name="ad2Weight" required min="0" max="100" step="1" placeholder="30"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+    </div>
+
+    <button type="submit" id="adsSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      更新
+    </button>
+
+    <p id="adsResultMsg" class="text-sm"></p>
   </form>
 </div>
 
@@ -125,14 +184,95 @@
   const linkSubmitBtn = document.getElementById('linkSubmitBtn');
   const linkResultMsg = document.getElementById('linkResultMsg');
 
+  const adsStatusBox = document.getElementById('adsStatusBox');
+  const adsForm      = document.getElementById('adsForm');
+  const adsSubmitBtn = document.getElementById('adsSubmitBtn');
+  const adsResultMsg = document.getElementById('adsResultMsg');
+  const logoutBtn    = document.getElementById('logoutBtn');
+
+  // セッション切れ(401)の場合は、ログイン画面に戻す
+  function redirectIfUnauthenticated(status) {
+    if (status === 401) {
+      location.href = '/admin';
+      return true;
+    }
+    return false;
+  }
+
+  logoutBtn.addEventListener('click', function () {
+    fetch('/api/logout', { method: 'POST' }).finally(() => {
+      location.href = '/admin';
+    });
+  });
+
   refreshVideoList();
   refreshLinkStatus();
+  refreshAdsStatus();
+
+  function refreshAdsStatus() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        adsStatusBox.textContent = data.ads
+          .map((ad) => `${ad.label}: ${ad.weight}%`)
+          .join(' / ');
+      })
+      .catch(() => {
+        adsStatusBox.textContent = '状態の取得に失敗しました。';
+      });
+  }
+
+  adsForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    adsResultMsg.textContent = '';
+    adsResultMsg.className = 'text-sm';
+    adsSubmitBtn.disabled = true;
+
+    const formData = new FormData(adsForm);
+
+    fetch('/api/set-ads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ads: [
+          {
+            label: formData.get('ad1Label'),
+            adCode: formData.get('ad1Code'),
+            weight: Number(formData.get('ad1Weight')),
+          },
+          {
+            label: formData.get('ad2Label'),
+            adCode: formData.get('ad2Code'),
+            weight: Number(formData.get('ad2Weight')),
+          },
+        ],
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        adsSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          adsResultMsg.textContent = '更新しました。';
+          adsResultMsg.classList.add('text-teal-600');
+          refreshAdsStatus();
+        } else {
+          adsResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          adsResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        adsSubmitBtn.disabled = false;
+        adsResultMsg.textContent = '通信エラーが発生しました。';
+        adsResultMsg.classList.add('text-rose-500');
+      });
+  });
 
   function refreshLinkStatus() {
     fetch('/site-config', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        linkStatusBox.textContent = `現在のリンク: ${data.premiumLink}`;
+        linkStatusBox.textContent = `現在のリンク: ${data.premiumLink} / ボタンの文字: ${data.premiumButtonText}`;
       })
       .catch(() => {
         linkStatusBox.textContent = '状態の取得に失敗しました。';
@@ -151,15 +291,16 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        passphrase: formData.get('passphrase'),
         url: formData.get('url'),
+        buttonText: formData.get('buttonText'),
       }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
       .then(({ status, data }) => {
         linkSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
-          linkResultMsg.textContent = `更新しました: ${data.premiumLink}`;
+          linkResultMsg.textContent = `更新しました: ${data.premiumLink} / ${data.premiumButtonText}`;
           linkResultMsg.classList.add('text-teal-600');
           refreshLinkStatus();
         } else {
@@ -233,22 +374,24 @@
     linkRow.appendChild(copyBtn);
 
     card.appendChild(linkRow);
+    card.appendChild(buildVideoTimeLimitSection(video));
+    card.appendChild(buildVideoAdsSection(video));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.textContent = '削除';
     deleteBtn.className = 'self-start text-xs font-medium text-rose-500 hover:text-rose-600 mt-1';
     deleteBtn.addEventListener('click', () => {
-      const passphrase = window.prompt('削除にはパスフレーズが必要です');
-      if (passphrase === null) return;
+      if (!window.confirm('この動画を削除しますか？')) return;
 
       fetch('/api/videos/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passphrase, id: video.id }),
+        body: JSON.stringify({ id: video.id }),
       })
         .then((res) => res.json().then((data) => ({ status: res.status, data })))
         .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
           if (status === 200 && data.ok) {
             refreshVideoList();
           } else {
@@ -262,6 +405,181 @@
     card.appendChild(deleteBtn);
 
     return card;
+  }
+
+  function buildVideoTimeLimitSection(video) {
+    const wrap = document.createElement('div');
+    wrap.className = 'flex items-center justify-between gap-2 border border-slate-100 rounded-lg px-3 py-2';
+
+    const label = document.createElement('span');
+    label.className = 'text-xs text-slate-600';
+
+    const tl = video.timeLimit;
+    if (!tl.enabled) {
+      label.textContent = '24時間限定: 無効';
+    } else if (tl.expired) {
+      label.textContent = '24時間限定: 期限切れ（' + tl.expiresAt + '）';
+    } else if (tl.firstAccessedAt) {
+      label.textContent = '24時間限定: 有効中（' + tl.expiresAt + ' まで）';
+    } else {
+      label.textContent = '24時間限定: 有効（未アクセス・開封時から起算）';
+    }
+    wrap.appendChild(label);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = tl.enabled ? '無効にする' : '有効にする';
+    toggleBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    toggleBtn.addEventListener('click', () => {
+      fetch('/api/videos/set-time-limit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: video.id, enabled: !tl.enabled }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            alert('更新に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          alert('通信エラーが発生しました。');
+        });
+    });
+    wrap.appendChild(toggleBtn);
+
+    return wrap;
+  }
+
+  function buildVideoAdsSection(video) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = video.ads
+      ? `広告: 個別設定中（${video.ads[0].label} ${video.ads[0].weight}% / ${video.ads[1].label} ${video.ads[1].weight}%）`
+      : '広告: 既定を使用（個別設定する）';
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const existing = video.ads || [null, null];
+
+    function makeField(labelText, placeholder, type, value) {
+      const label = document.createElement('label');
+      label.className = 'flex flex-col gap-0.5';
+      const span = document.createElement('span');
+      span.className = 'text-[11px] text-slate-500';
+      span.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = type || 'text';
+      input.placeholder = placeholder || '';
+      if (value !== undefined && value !== null) input.value = value;
+      input.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+      label.appendChild(span);
+      label.appendChild(input);
+      body.appendChild(label);
+      return input;
+    }
+
+    const ad1LabelInput = makeField('広告A ラベル', '広告A', 'text', existing[0] && existing[0].label);
+    const ad1CodeInput  = makeField('広告A コード（任意）', '', 'text', existing[0] && existing[0].adCode);
+    const ad1WeightInput= makeField('広告A 表示比率（%）', '70', 'number', existing[0] && existing[0].weight);
+
+    const ad2LabelInput = makeField('広告B ラベル', '広告B', 'text', existing[1] && existing[1].label);
+    const ad2CodeInput  = makeField('広告B コード（任意）', '', 'text', existing[1] && existing[1].adCode);
+    const ad2WeightInput= makeField('広告B 表示比率（%）', '30', 'number', existing[1] && existing[1].weight);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-2';
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'この動画に適用';
+    applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+    applyBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+
+      fetch('/api/videos/set-ads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: video.id,
+          ads: [
+            {
+              label: ad1LabelInput.value,
+              adCode: ad1CodeInput.value,
+              weight: Number(ad1WeightInput.value),
+            },
+            {
+              label: ad2LabelInput.value,
+              adCode: ad2CodeInput.value,
+              weight: Number(ad2WeightInput.value),
+            },
+          ],
+        }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    });
+    btnRow.appendChild(applyBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.textContent = '既定に戻す';
+    resetBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
+    resetBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+
+      fetch('/api/videos/set-ads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: video.id, ads: null }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    });
+    btnRow.appendChild(resetBtn);
+
+    body.appendChild(btnRow);
+    wrap.appendChild(body);
+
+    return wrap;
   }
 
   uploadForm.addEventListener('submit', function (e) {
@@ -284,6 +602,8 @@
 
     xhr.addEventListener('load', function () {
       submitBtn.disabled = false;
+      if (redirectIfUnauthenticated(xhr.status)) return;
+
       let data;
       try {
         data = JSON.parse(xhr.responseText);

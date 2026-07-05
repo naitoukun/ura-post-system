@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理者ログイン | Secret Viewer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#14b8a6;
+    --accent-teal-dark:#0d9488;
+  }
+  html,body{
+    background:#f4f7fa;
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #e7edf3;
+    box-shadow:0 4px 20px rgba(15,45,60,0.06);
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 6px 16px rgba(20,184,166,0.35);
+    transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+  }
+  .btn-primary:active{ transform:scale(0.98); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
+</style>
+</head>
+<body class="min-h-screen w-full flex items-center justify-center p-4">
+
+<div class="w-full max-w-sm mx-auto flex flex-col gap-5">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">管理者ログイン</h1>
+    <p class="text-xs text-slate-400 mt-1">パスフレーズと、認証アプリの6桁コードの両方が必要です。</p>
+  </div>
+
+  <form id="loginForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">パスフレーズ</span>
+      <input type="password" name="passphrase" required autocomplete="current-password"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">6桁コード</span>
+      <input type="text" name="code" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+        autocomplete="one-time-code" placeholder="123456"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <button type="submit" id="loginSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      ログイン
+    </button>
+
+    <p id="loginResultMsg" class="text-sm text-rose-500"></p>
+  </form>
+
+  <a href="/admin/totp-setup" class="text-xs text-slate-400 hover:text-slate-600 underline text-center">
+    2段階認証の初回セットアップはこちら
+  </a>
+</div>
+
+<script>
+(function () {
+  const loginForm = document.getElementById('loginForm');
+  const submitBtn = document.getElementById('loginSubmitBtn');
+  const resultMsg = document.getElementById('loginResultMsg');
+
+  loginForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    resultMsg.textContent = '';
+    submitBtn.disabled = true;
+
+    const formData = new FormData(loginForm);
+
+    fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        passphrase: formData.get('passphrase'),
+        code: formData.get('code'),
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (status === 200 && data.ok) {
+          location.href = '/admin';
+        } else {
+          submitBtn.disabled = false;
+          resultMsg.textContent = 'パスフレーズまたはコードが正しくありません。';
+        }
+      })
+      .catch(() => {
+        submitBtn.disabled = false;
+        resultMsg.textContent = '通信エラーが発生しました。';
+      });
+  });
+})();
+</script>
+
+</body>
+</html>

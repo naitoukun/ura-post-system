@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>トレンド情報まとめ（仮）</title>
+
+<!--
+  ============================================================
+  このファイルについて
+  ============================================================
+  ・シンプルな「トレンドまとめブログ」風のトップページです。
+  ・記事タイトル・概要・画像はすべてダミーです。公開前に必ず
+    実際の記事内容に差し替えてください。
+  ・フッターの「プライバシーポリシー」「お問い合わせ」は
+    href="#" のダミーリンクにしてあります。実際に運用する際は
+    別ページ（privacy.html / contact.html 等）を用意して
+    リンク先を差し替えてください。
+  ・記事を追加したい場合は、下の「記事カード」という説明が付いた
+    ブロック（aタグ1つ分）をコピーして増やせば増やせます。
+  ============================================================
+-->
+
+<style>
+  /* ===== 全体の基本設定 ===== */
+  * {
+    box-sizing: border-box; /* padding分でレイアウトが崩れないようにする */
+  }
+  body {
+    margin: 0;
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    background-color: #f7f8fa; /* 全体の背景色（明るいグレー） */
+    color: #333;
+    line-height: 1.7;
+  }
+
+  /* ===== ヘッダー ===== */
+  header {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 16px 20px;
+    text-align: center;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 22px;
+    color: #222;
+  }
+  header p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: #888;
+  }
+
+  /* ===== コンテンツ全体の幅を制限（スマホでは自動で画面幅いっぱいになる） ===== */
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 20px 16px 40px;
+  }
+
+  /* ===== セクション見出し（「新着記事」など） ===== */
+  .section-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin: 24px 0 12px;
+    padding-left: 10px;
+    border-left: 4px solid #4a90e2; /* アクセントカラー。好きな色に変更可 */
+  }
+
+  /* ===== 記事カード一覧 ===== */
+  .article-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px; /* カード同士の間隔 */
+  }
+
+  /* 記事カード1つ分のデザイン */
+  .article-card {
+    display: block;
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+  }
+  .article-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    transform: translateY(-1px);
+  }
+
+  /* 記事カテゴリのラベル（芸能・ガジェット等） */
+  .article-category {
+    display: inline-block;
+    font-size: 11px;
+    color: #4a90e2;
+    background-color: #eaf2fd;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+
+  /* 記事タイトル */
+  .article-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin: 0 0 6px;
+    color: #222;
+  }
+
+  /* 記事の概要（抜粋文） */
+  .article-excerpt {
+    font-size: 13px;
+    color: #666;
+    margin: 0;
+  }
+
+  /* ===== フッター ===== */
+  footer {
+    text-align: center;
+    padding: 24px 16px;
+    font-size: 12px;
+    color: #999;
+    border-top: 1px solid #e5e7eb;
+    background-color: #ffffff;
+  }
+  footer a {
+    color: #666;
+    text-decoration: underline;
+    margin: 0 6px;
+  }
+  footer .copyright {
+    margin-top: 10px;
+    color: #bbb;
+  }
+</style>
+</head>
+<body>
+
+  <!-- ===== ヘッダー（サイトタイトル部分） ===== -->
+  <header>
+    <h1>トレンド情報まとめ（仮）</h1>
+    <p>芸能・ガジェット・暮らしの豆知識をゆるっとまとめるブログです</p>
+  </header>
+
+  <main>
+
+    <!-- ===== 記事一覧の見出し ===== -->
+    <div class="section-title">新着記事</div>
+
+    <!-- ===== 記事一覧（この中に記事カードを並べる） ===== -->
+    <div class="article-list">
+
+      <!-- 記事カード：芸能ニュース（ダミー） -->
+      <!-- onclick部分は「押すとポップアップが出る」ダミーの挙動です。
+           実際の記事ページができたら、href="#" を href="記事のURL" に、
+           onclick の行はまるごと削除してください。 -->
+      <a
+        class="article-card"
+        href="#"
+        onclick="alert('この記事は準備中です（ダミーページ）'); return false;"
+      >
+        <span class="article-category">芸能</span>
+        <p class="article-title">人気俳優の〇〇さん、来春の新ドラマ出演が決定</p>
+        <p class="article-excerpt">
+          〇〇さんが来春放送予定の新ドラマへの出演を発表。共演者や役どころなど、
+          現時点で分かっている情報をまとめました。
+        </p>
+      </a>
+
+      <!-- 記事カード：ガジェット紹介（ダミー） -->
+      <a
+        class="article-card"
+        href="#"
+        onclick="alert('この記事は準備中です（ダミーページ）'); return false;"
+      >
+        <span class="article-category">ガジェット</span>
+        <p class="article-title">話題のワイヤレスイヤホン新モデル、何が変わった？</p>
+        <p class="article-excerpt">
+          各メーカーから続々と登場している最新ワイヤレスイヤホン。
+          バッテリー持ちやノイズキャンセリング性能など、注目ポイントを紹介します。
+        </p>
+      </a>
+
+      <!-- 記事カード：暮らしの豆知識（ダミー） -->
+      <a
+        class="article-card"
+        href="#"
+        onclick="alert('この記事は準備中です（ダミーページ）'); return false;"
+      >
+        <span class="article-category">暮らし</span>
+        <p class="article-title">洗濯物が早く乾く！ちょっとした干し方のコツ3選</p>
+        <p class="article-excerpt">
+          梅雨や冬場に嬉しい、部屋干しでも早く乾かすための簡単なコツをご紹介。
+          今日からすぐに試せる内容です。
+        </p>
+      </a>
+
+      <!-- 記事カード：グルメ・トレンド（ダミー） -->
+      <a
+        class="article-card"
+        href="#"
+        onclick="alert('この記事は準備中です（ダミーページ）'); return false;"
+      >
+        <span class="article-category">グルメ</span>
+        <p class="article-title">SNSで話題！今行きたい東京のおしゃれカフェ5選</p>
+        <p class="article-excerpt">
+          写真映えすると評判のカフェを厳選してピックアップ。
+          週末のお出かけ先に迷ったらチェックしてみてください。
+        </p>
+      </a>
+
+      <!-- 記事カードを増やしたい場合は、上の <a class="article-card">...</a>
+           のブロックをまるごとコピーして、この下に貼り付けてください。 -->
+
+    </div>
+  </main>
+
+  <!-- ===== フッター（プライバシーポリシー・お問い合わせへの導線） ===== -->
+  <footer>
+    <div>
+      <!-- 実際に運用する際は、下記2つを実ページへのリンクに差し替えてください -->
+      <a href="#">プライバシーポリシー</a>
+      |
+      <a href="#">お問い合わせ</a>
+    </div>
+    <div class="copyright">
+      &copy; 2026 トレンド情報まとめ（仮）
+    </div>
+  </footer>
+
+</body>
+</html>

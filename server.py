@@ -1,8 +1,8 @@
 """
 シークレット・ビューア: 開発用の簡易バックエンド。
 
-- GET  /                TOPページ。通常は公開動画一覧(gallery.html)、
-                        ?v=<動画ID> 付きの場合は動画アンロックページ(index.html)
+- GET  /                動画アンロックページ(index.html)。共有リンク専用にするため
+                        一覧等は置かず、常にindex.htmlを返す
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示)
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
@@ -12,7 +12,6 @@
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
-- GET  /api/public-videos  公開動画一覧(gallery.html用)。24時間限定の動画は除外 (JSON)
 - GET  /resolve-video   指定した(または最新の)動画のメタ情報 (JSON)
 - GET  /video/<id>      指定した動画の配信（Range対応 = シーク可能）
 - POST /api/upload      動画アップロード（multipart/form-data。動画ごとに新しいIDを発行）※要ログイン
@@ -391,12 +390,9 @@ class Handler(BaseHTTPRequestHandler):
         split = urlsplit(self.path)
         path = split.path
         if path == "/":
-            # TOP(素のURL)は公開動画一覧(gallery.html)を表示する。
-            # ?v=<動画ID> の共有リンクでアクセスされた場合は、従来通り動画アンロックページを表示する。
-            if "v" in parse_qs(split.query):
-                self.serve_file(os.path.join(BASE_DIR, "index.html"), "text/html; charset=utf-8")
-            else:
-                self.serve_file(os.path.join(BASE_DIR, "gallery.html"), "text/html; charset=utf-8")
+            # TOP(素のURL)は共有リンク専用。個別の?v=<動画ID>を知っている相手だけが
+            # 動画にたどり着ける状態にし、他の動画への回遊(一覧からの流出)は作らない。
+            self.serve_file(os.path.join(BASE_DIR, "index.html"), "text/html; charset=utf-8")
         elif path == "/index.html":
             # 動画アンロックページへの直接アクセス用（?v=無しでも常にアプリを表示）
             self.serve_file(os.path.join(BASE_DIR, "index.html"), "text/html; charset=utf-8")
@@ -419,8 +415,6 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_list_videos()
-        elif path == "/api/public-videos":
-            self.handle_list_public_videos()
         elif path == "/resolve-video":
             self.handle_resolve_video(parse_qs(split.query))
         elif path.startswith("/video/"):
@@ -461,49 +455,28 @@ class Handler(BaseHTTPRequestHandler):
         ]
         self.respond_json(200, body)
 
-    def handle_list_public_videos(self):
-        """公開一覧(gallery.html)用。認証不要。
-
-        24時間限定の動画は、一覧に出るだけで(サムネイル取得のため)動画バイトへの
-        リクエストが発生し、それが「初回アクセス」としてカウントされてしまうと
-        タイマーの趣旨(共有された相手が実際に開いた時から24時間)とズレるため、
-        時間限定が有効な動画は一覧から完全に除外する。
-        """
-        videos = [v for v in load_videos() if not v.get("time_limit_enabled") and video_file_path(v)]
-        videos.sort(key=lambda v: v["uploaded_at"], reverse=True)
-        body = [
-            {
-                "id": v["id"],
-                "uploadedAt": v["uploaded_at"],
-                "creatorName": v.get("creator_name"),
-            }
-            for v in videos
-        ]
-        self.respond_json(200, body)
-
     def handle_resolve_video(self, query):
         requested_id = (query.get("v") or [None])[0]
-        videos_list = load_videos()
 
-        if requested_id:
-            video = next((v for v in videos_list if v["id"] == requested_id), None)
-            if not video or not video_file_path(video):
-                # 削除済み・存在しないIDへのアクセスは「期限切れ」と同じ画面に統一する。
-                # (手動削除なのか自然に24時間経過したのかを外部から区別させないため)
-                self.respond_json(200, {"exists": True, "expired": True})
-                return
-        else:
-            videos_sorted = sorted(videos_list, key=lambda v: v["uploaded_at"], reverse=True)
-            video = videos_sorted[0] if videos_sorted else None
-            if not video or not video_file_path(video):
-                self.respond_json(200, {"exists": False})
-                return
+        if not requested_id:
+            # 共有リンク(?v=<id>)が無いアクセスは、他の動画への回遊を防ぐため
+            # 動画を一切表示しない(「リンクが必要です」の案内のみ)。
+            self.respond_json(200, {"linkRequired": True})
+            return
+
+        videos_list = load_videos()
+        video = next((v for v in videos_list if v["id"] == requested_id), None)
+        if not video or not video_file_path(video):
+            # 削除済み・存在しないIDへのアクセスは「期限切れ」と同じ画面に統一する。
+            # (手動削除なのか自然に24時間経過したのかを外部から区別させないため)
+            self.respond_json(200, {"expired": True})
+            return
 
         # 「URLが初めて開かれた瞬間」をこの時点で記録する
         mark_first_access(video, videos_list)
 
         if get_time_limit_status(video)["expired"]:
-            self.respond_json(200, {"exists": True, "expired": True})
+            self.respond_json(200, {"expired": True})
             return
 
         # モザイク越しのロック画面が表示された回数を視聴回数としてカウントする
@@ -516,7 +489,6 @@ class Handler(BaseHTTPRequestHandler):
         cta = get_effective_cta(video, config)
 
         self.respond_json(200, {
-            "exists": True,
             "expired": False,
             "id": video["id"],
             "originalFilename": video["original_filename"],

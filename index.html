@@ -112,6 +112,15 @@
     <p class="text-sm text-slate-400">この動画リンクは、初回アクセスから24時間で視聴できなくなります。</p>
   </div>
 
+  <!-- リンク未指定エリア（共有リンク無しで直接アクセスされた場合） -->
+  <div id="linkRequiredArea" class="hidden-el w-full flex flex-col items-center gap-3 card rounded-2xl p-6 text-center">
+    <svg class="w-10 h-10 text-slate-300" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5M10.172 13.828a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <p class="text-base font-bold text-slate-700">共有されたリンクが必要です</p>
+    <p class="text-sm text-slate-400">このページは、個別に発行された動画リンクからのみご利用いただけます。</p>
+  </div>
+
   <!-- ロック中エリア -->
   <div id="lockedArea" class="w-full flex flex-col items-center gap-5">
 
@@ -199,6 +208,7 @@
   const unlockBtn   = document.getElementById('unlockBtn');
   const lockedArea  = document.getElementById('lockedArea');
   const expiredArea = document.getElementById('expiredArea');
+  const linkRequiredArea = document.getElementById('linkRequiredArea');
   const unlockedArea= document.getElementById('unlockedArea');
   const overlay     = document.getElementById('overlay');
   const mainVideo   = document.getElementById('mainVideo');
@@ -217,14 +227,12 @@
   // （実際の広告は尺が広告ごとに異なり、終了タイミングはSDK側のコールバックで通知されるため、
   // 通常はここに来ない。あくまで広告が出せない時に視聴者を待たせすぎないための保険）。
   const NO_AD_FALLBACK_WAIT_MS = 3000;
-  // 管理画面(/admin)からアップロードされた動画が無い場合のフォールバック
-  const FALLBACK_VIDEO_URL = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   // 管理画面(/admin)からリンクが設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_LINK = 'https://fantia.jp/';
   // 管理画面(/admin)からボタンの文字が設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_BUTTON_TEXT = '【ファン限定】Fantia特設ページへ';
-  // URLに ?v=<動画ID> が付いていれば、その動画を優先的に表示する
-  // （個別のシェア用リンクを動画ごとに使い分けるため）。指定が無ければ最新の動画を表示する。
+  // URLに ?v=<動画ID> が付いていればその動画を表示する（個別のシェア用リンク）。
+  // 指定が無い場合は、他の動画への回遊を防ぐため「リンクが必要です」の案内を表示する。
   const requestedVideoId = new URLSearchParams(location.search).get('v');
   // モザイクの粗さ（横方向のブロック数）。小さいほど粗いモザイクになる。
   const MOSAIC_COLUMNS = 18;
@@ -241,6 +249,11 @@
   // ページ読み込み時に一度だけ解決してキャッシュしておく
   const videoInfoPromise = resolveVideo();
   videoInfoPromise.then((info) => {
+    if (info.linkRequired) {
+      lockedArea.classList.add('hidden-el');
+      linkRequiredArea.classList.remove('hidden-el');
+      return;
+    }
     if (info.expired) {
       lockedArea.classList.add('hidden-el');
       expiredArea.classList.remove('hidden-el');
@@ -410,32 +423,29 @@
   }
 
   // 動画URLと、その動画に紐づく広告A/B設定（個別設定 or サイト既定）をまとめて解決する。
-  // 24時間限定の動画で期限切れの場合は expired:true を返す。
+  // 共有リンク(?v=)が無ければ linkRequired:true を、24時間限定の動画で期限切れ/
+  // 削除済みの場合は expired:true を返す。
   function resolveVideo() {
     const query = requestedVideoId ? '?v=' + encodeURIComponent(requestedVideoId) : '';
     return fetch('/resolve-video' + query, { cache: 'no-store' })
       .then((res) => res.json())
       .then((status) => {
-        if (status.exists && status.expired) {
+        if (status.linkRequired) {
+          return { linkRequired: true };
+        }
+        if (status.expired) {
           return { expired: true };
         }
         return {
           expired: false,
-          url: status.exists ? '/video/' + status.id : FALLBACK_VIDEO_URL,
-          ads: status.exists ? status.ads : null,
-          timeLimit: status.exists ? status.timeLimit : null,
-          premiumLink: status.exists ? status.premiumLink : null,
-          premiumButtonText: status.exists ? status.premiumButtonText : null,
+          url: '/video/' + status.id,
+          ads: status.ads,
+          timeLimit: status.timeLimit,
+          premiumLink: status.premiumLink,
+          premiumButtonText: status.premiumButtonText,
         };
       })
-      .catch(() => ({
-        expired: false,
-        url: FALLBACK_VIDEO_URL,
-        ads: null,
-        timeLimit: null,
-        premiumLink: null,
-        premiumButtonText: null,
-      }));
+      .catch(() => ({ linkRequired: true }));
   }
 
   // ロック中の枠に、アップロード済み動画をモザイク処理してチラ見せする。

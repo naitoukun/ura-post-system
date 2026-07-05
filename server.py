@@ -6,6 +6,8 @@
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示)
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
+- GET  /terms           利用規約
+- GET  /disclaimer      免責事項
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
@@ -406,6 +408,10 @@ class Handler(BaseHTTPRequestHandler):
             # サーバーの実際のTOTP_SECRETはここでは一切扱わない。
             # 入力された値をブラウザ内だけでQRコード化する単なるツール。
             self.serve_file(os.path.join(BASE_DIR, "admin-totp-setup.html"), "text/html; charset=utf-8")
+        elif path == "/terms":
+            self.serve_file(os.path.join(BASE_DIR, "terms.html"), "text/html; charset=utf-8")
+        elif path == "/disclaimer":
+            self.serve_file(os.path.join(BASE_DIR, "disclaimer.html"), "text/html; charset=utf-8")
         elif path == "/api/videos":
             if self.require_auth():
                 return

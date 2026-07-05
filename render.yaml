@@ -9,6 +9,8 @@ services:
       # Renderのダッシュボードで値を入力する（リポジトリには保存されない）
       - key: UPLOAD_PASSPHRASE
         sync: false
+      - key: TOTP_SECRET
+        sync: false
       - key: UPLOAD_DIR
         value: /var/data
     disks:

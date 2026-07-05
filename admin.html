@@ -188,6 +188,10 @@
 
 <script>
 (function () {
+  // 動画ごとの個別広告設定で、まだ個別設定が無い場合の広告Aコードの初期値
+  // （サイト既定の広告Aとして普段使っているVASTタグ）。
+  const DEFAULT_AD1_CODE = 'https://s.magsrv.com/v1/vast.php?idz=5967416';
+
   const uploadForm  = document.getElementById('uploadForm');
   const submitBtn   = document.getElementById('submitBtn');
   const progressWrap= document.getElementById('progressWrap');
@@ -231,8 +235,22 @@
       .then((res) => res.json())
       .then((data) => {
         adsStatusBox.textContent = data.ads
-          .map((ad) => `${ad.label}: ${ad.weight}%`)
+          .map((ad) => `${ad.label}: ${ad.weight}%${ad.adCode ? ' (' + ad.adCode + ')' : ''}`)
           .join(' / ');
+
+        // フォームには常に現在保存されている値を表示する（更新後もこれで
+        // 最新の設定がそのまま見える状態を保つ）。
+        const [ad1, ad2] = data.ads;
+        if (ad1) {
+          adsForm.elements['ad1Label'].value = ad1.label;
+          adsForm.elements['ad1Code'].value = ad1.adCode;
+          adsForm.elements['ad1Weight'].value = ad1.weight;
+        }
+        if (ad2) {
+          adsForm.elements['ad2Label'].value = ad2.label;
+          adsForm.elements['ad2Code'].value = ad2.adCode;
+          adsForm.elements['ad2Weight'].value = ad2.weight;
+        }
       })
       .catch(() => {
         adsStatusBox.textContent = '状態の取得に失敗しました。';
@@ -660,8 +678,12 @@
       return input;
     }
 
+    // まだ個別設定が無い動画では、広告Aコードのみサイト既定でよく使う値を
+    // 初期値として入れておく（個別設定が既にある場合はその保存値をそのまま尊重する）。
+    const ad1CodeDefault = existing[0] ? existing[0].adCode : DEFAULT_AD1_CODE;
+
     const ad1LabelInput = makeField('広告A ラベル', '広告A', 'text', existing[0] && existing[0].label);
-    const ad1CodeInput  = makeField('広告A コード（任意）', '', 'text', existing[0] && existing[0].adCode);
+    const ad1CodeInput  = makeField('広告A コード（任意）', '', 'text', ad1CodeDefault);
     const ad1WeightInput= makeField('広告A 表示比率（%）', '70', 'number', existing[0] && existing[0].weight);
 
     const ad2LabelInput = makeField('広告B ラベル', '広告B', 'text', existing[1] && existing[1].label);

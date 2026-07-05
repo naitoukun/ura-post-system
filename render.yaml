@@ -13,7 +13,7 @@ services:
         sync: false
       - key: UPLOAD_DIR
         value: /var/data
-    disks:
-      - name: secret-viewer-data
-        mountPath: /var/data
-        sizeGB: 5
+    disk:
+      name: secret-viewer-data
+      mountPath: /var/data
+      sizeGB: 5

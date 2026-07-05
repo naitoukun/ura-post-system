@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Secret Viewer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#14b8a6;
+    --accent-teal-dark:#0d9488;
+    --bg-page:#f4f7fa;
+  }
+  html,body{
+    background:var(--bg-page);
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .brand{
+    font-family:'Outfit','Noto Sans JP',sans-serif;
+    font-weight:800;
+    letter-spacing:-0.02em;
+  }
+  .brand-accent{ color:var(--accent-teal-dark); }
+
+  .card{
+    background:#ffffff;
+    border:1px solid #e7edf3;
+    box-shadow:0 4px 16px rgba(15,45,60,0.06);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover{
+    transform:translateY(-2px);
+    box-shadow:0 8px 22px rgba(15,45,60,0.1);
+  }
+  .thumb-canvas{
+    background:linear-gradient(135deg,#eef2f6,#e2e8f0);
+  }
+  .hidden-el{ display:none !important; }
+
+  @keyframes spin{
+    from{ transform:rotate(0deg); }
+    to{ transform:rotate(360deg); }
+  }
+  .spin{ animation:spin 1s linear infinite; }
+</style>
+</head>
+<body class="min-h-screen w-full">
+
+<div class="w-full max-w-5xl mx-auto flex flex-col items-center gap-6 px-4 py-8">
+
+  <div class="flex flex-col items-center gap-1">
+    <h1 class="brand text-3xl sm:text-4xl text-slate-800 text-center whitespace-nowrap">
+      Secret<span class="brand-accent">Viewer</span>
+    </h1>
+    <p class="text-xs text-slate-400 tracking-wide">広告視聴でコンテンツをアンロック</p>
+  </div>
+
+  <div id="emptyState" class="hidden-el w-full text-center text-sm text-slate-400 py-16">
+    現在公開中の動画はありません。
+  </div>
+
+  <div id="grid" class="w-full grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4"></div>
+
+  <footer class="mt-4 text-center text-[11px] text-gray-400">
+    <p>当サイトは動画広告視聴型のリワードコンテンツゲートです。</p>
+    <p>
+      <a href="/terms" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">利用規約</a> |
+      <a href="/disclaimer" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">免責事項</a> |
+      <a href="/copyright-policy" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">著作権ポリシー</a> |
+      <a href="https://x.com/urapost_info" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">お問い合わせ</a>
+    </p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  const grid = document.getElementById('grid');
+  const emptyState = document.getElementById('emptyState');
+
+  // カードが画面内に入った時だけ動画を読み込み、1フレームだけCanvasに
+  // 描画したらすぐ接続を切る（一覧全体を継続的にモザイク再生すると、
+  // 動画本数分の同時ストリーミングが発生しVPSの負荷が跳ね上がるため）。
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const card = entry.target;
+      observer.unobserve(card);
+      captureThumbnail(card);
+    }
+  }, { rootMargin: '200px' });
+
+  fetch('/api/public-videos', { cache: 'no-store' })
+    .then((res) => res.json())
+    .then((videos) => {
+      if (!videos.length) {
+        emptyState.classList.remove('hidden-el');
+        return;
+      }
+      for (const video of videos) {
+        const card = buildCard(video);
+        grid.appendChild(card);
+        observer.observe(card);
+      }
+    })
+    .catch(() => {
+      emptyState.textContent = '動画一覧の取得に失敗しました。';
+      emptyState.classList.remove('hidden-el');
+    });
+
+  function buildCard(video) {
+    const a = document.createElement('a');
+    a.href = '/?v=' + encodeURIComponent(video.id);
+    a.className = 'card rounded-xl overflow-hidden flex flex-col';
+    a.dataset.videoId = video.id;
+
+    const thumbWrap = document.createElement('div');
+    thumbWrap.className = 'thumb-canvas relative w-full aspect-video flex items-center justify-center';
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'absolute inset-0 w-full h-full';
+    thumbWrap.appendChild(canvas);
+
+    const spinner = document.createElement('svg');
+    spinner.setAttribute('viewBox', '0 0 24 24');
+    spinner.setAttribute('fill', 'none');
+    spinner.className = 'spin thumb-spinner w-6 h-6 text-slate-300 relative z-10';
+    spinner.innerHTML = '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="42 100"/>';
+    thumbWrap.appendChild(spinner);
+
+    const label = document.createElement('div');
+    label.className = 'px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 truncate';
+    label.textContent = video.creatorName ? video.creatorName : '動画を見る';
+
+    a.appendChild(thumbWrap);
+    a.appendChild(label);
+    a._thumbCanvas = canvas;
+    a._spinner = spinner;
+    return a;
+  }
+
+  function captureThumbnail(card) {
+    const videoId = card.dataset.videoId;
+    const canvas = card._thumbCanvas;
+    const spinner = card._spinner;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+
+    const el = document.createElement('video');
+    el.muted = true;
+    el.playsInline = true;
+    el.preload = 'auto';
+    el.src = '/video/' + encodeURIComponent(videoId);
+
+    const cleanup = () => {
+      el.removeAttribute('src');
+      el.load();
+    };
+
+    el.addEventListener('loadeddata', () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width || 300;
+      canvas.height = rect.height || 169;
+      const scale = Math.max(canvas.width / el.videoWidth, canvas.height / el.videoHeight);
+      const drawWidth = el.videoWidth * scale;
+      const drawHeight = el.videoHeight * scale;
+      ctx.drawImage(
+        el,
+        (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2,
+        drawWidth, drawHeight
+      );
+      spinner.classList.add('hidden-el');
+      cleanup();
+    }, { once: true });
+
+    el.addEventListener('error', () => {
+      spinner.classList.add('hidden-el');
+      cleanup();
+    }, { once: true });
+  }
+})();
+</script>
+
+</body>
+</html>

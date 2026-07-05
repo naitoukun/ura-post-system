@@ -89,7 +89,7 @@
       <span id="progressText" class="text-xs text-slate-400">0%</span>
     </div>
 
-    <p id="resultMsg" class="text-sm"></p>
+    <div id="resultMsg" class="text-sm"></div>
   </form>
 
   <div>
@@ -786,9 +786,41 @@
 
       if (xhr.status === 200 && data.ok) {
         const shareUrl = location.origin + '/?v=' + encodeURIComponent(data.id);
-        resultMsg.textContent = `アップロード完了: ${data.originalFilename}（リンク: ${shareUrl}）`;
-        resultMsg.classList.add('text-teal-600');
+        // resultMsgはform内にあるため、動的に追加するlinkInputをform.reset()で
+        // 巻き込んで空にしないよう、DOM構築より先にresetしておく。
         uploadForm.reset();
+        resultMsg.textContent = '';
+        resultMsg.classList.add('text-teal-600');
+
+        const label = document.createElement('p');
+        label.textContent = `アップロード完了: ${data.originalFilename}`;
+        resultMsg.appendChild(label);
+
+        const linkRow = document.createElement('div');
+        linkRow.className = 'flex gap-2 mt-1';
+
+        const linkInput = document.createElement('input');
+        linkInput.type = 'text';
+        linkInput.readOnly = true;
+        linkInput.value = shareUrl;
+        linkInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-600 bg-slate-50';
+        linkInput.addEventListener('focus', () => linkInput.select());
+        linkRow.appendChild(linkInput);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.textContent = 'コピー';
+        copyBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText(shareUrl).then(() => {
+            copyBtn.textContent = 'コピー済み';
+            setTimeout(() => { copyBtn.textContent = 'コピー'; }, 1500);
+          });
+        });
+        linkRow.appendChild(copyBtn);
+
+        resultMsg.appendChild(linkRow);
+
         refreshVideoList();
       } else {
         resultMsg.textContent = 'アップロードに失敗しました（' + (data.error || xhr.status) + '）';

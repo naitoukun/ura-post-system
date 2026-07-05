@@ -217,11 +217,9 @@
   // /resolve-video の取得が完了するまではフォールバックを使う
   let siteAds = FALLBACK_ADS;
 
-  // サイト設定（プレミアムリンク・ボタン文字）はアンロックを待たず
-  // ページ読み込み時点で取得しておく
-  loadSiteConfig();
-
-  // 本編動画のURL・広告A/B設定はロック中のモザイク表示とアンロック後の本編再生で共通なので、
+  // 本編動画のURL・広告A/B設定・誘導ボタンのリンク先/文字は、この動画専用の
+  // 個別設定(出演者名+Fantia URL)が無ければサイト全体の既定値になる。
+  // ロック中のモザイク表示とアンロック後の本編再生・ボタン表示で共通して使うので、
   // ページ読み込み時に一度だけ解決してキャッシュしておく
   const videoInfoPromise = resolveVideo();
   videoInfoPromise.then((info) => {
@@ -232,6 +230,9 @@
     }
     siteAds = (info.ads && info.ads.length) ? info.ads : FALLBACK_ADS;
     startTeaserPreview(info.url);
+
+    premiumLink.href = info.premiumLink || FALLBACK_PREMIUM_LINK;
+    premiumLink.textContent = info.premiumButtonText || FALLBACK_PREMIUM_BUTTON_TEXT;
 
     if (info.timeLimit && info.timeLimit.enabled && info.timeLimit.expiresAtEpoch) {
       startCountdown(info.timeLimit.expiresAtEpoch);
@@ -335,9 +336,18 @@
           url: status.exists ? '/video/' + status.id : FALLBACK_VIDEO_URL,
           ads: status.exists ? status.ads : null,
           timeLimit: status.exists ? status.timeLimit : null,
+          premiumLink: status.exists ? status.premiumLink : null,
+          premiumButtonText: status.exists ? status.premiumButtonText : null,
         };
       })
-      .catch(() => ({ expired: false, url: FALLBACK_VIDEO_URL, ads: null, timeLimit: null }));
+      .catch(() => ({
+        expired: false,
+        url: FALLBACK_VIDEO_URL,
+        ads: null,
+        timeLimit: null,
+        premiumLink: null,
+        premiumButtonText: null,
+      }));
   }
 
   // ロック中の枠に、アップロード済み動画をモザイク処理してチラ見せする。
@@ -390,18 +400,6 @@
     mosaicRafId = requestAnimationFrame(drawMosaicFrame);
   }
 
-  function loadSiteConfig() {
-    fetch('/site-config', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((config) => {
-        premiumLink.href = config.premiumLink || FALLBACK_PREMIUM_LINK;
-        premiumLink.textContent = config.premiumButtonText || FALLBACK_PREMIUM_BUTTON_TEXT;
-      })
-      .catch(() => {
-        premiumLink.href = FALLBACK_PREMIUM_LINK;
-        premiumLink.textContent = FALLBACK_PREMIUM_BUTTON_TEXT;
-      });
-  }
 })();
 </script>
 

@@ -61,6 +61,23 @@
       <span class="text-sm text-slate-700">初回アクセスから24時間限定にする</span>
     </label>
 
+    <div class="flex flex-col gap-3 border border-slate-100 rounded-xl p-3">
+      <span class="text-xs font-bold text-slate-500">誘導ボタン（任意・出演者ごとに個別設定）</span>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">出演者名（20文字まで）</span>
+        <input type="text" name="creatorName" maxlength="20" placeholder="例: あかり"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">本人のFantia URL</span>
+        <input type="url" name="creatorUrl" placeholder="https://fantia.jp/fanclubs/..."
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+      <p class="text-xs text-slate-400">
+        両方入力すると、誘導ボタンが「（名前）を応援する」に、リンク先がこのURLになります。空欄なら既定の設定が使われます。
+      </p>
+    </div>
+
     <button type="submit" id="submitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
       アップロード（新規URLを発行）
     </button>
@@ -338,18 +355,52 @@
   function buildVideoCard(video) {
     const shareUrl = location.origin + '/?v=' + encodeURIComponent(video.id);
 
-    const card = document.createElement('div');
-    card.className = 'card rounded-2xl p-4 flex flex-col gap-2';
+    const card = document.createElement('details');
+    card.className = 'card rounded-2xl overflow-hidden';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none p-4 flex flex-col gap-1';
 
     const title = document.createElement('p');
     title.className = 'text-sm font-medium text-slate-700 break-all';
     title.textContent = video.originalFilename;
-    card.appendChild(title);
+    summary.appendChild(title);
 
     const meta = document.createElement('p');
     meta.className = 'text-xs text-slate-400';
     meta.textContent = 'アップロード日時: ' + video.uploadedAt;
-    card.appendChild(meta);
+    summary.appendChild(meta);
+
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'flex flex-wrap gap-1 mt-1';
+
+    function addBadge(text, tone) {
+      const badge = document.createElement('span');
+      badge.textContent = text;
+      badge.className = 'text-[11px] px-2 py-0.5 rounded-full ' + tone;
+      badgeRow.appendChild(badge);
+    }
+
+    if (video.timeLimit && video.timeLimit.enabled) {
+      addBadge(
+        video.timeLimit.expired ? '24時間限定: 期限切れ' : '24時間限定: 有効',
+        video.timeLimit.expired ? 'bg-slate-100 text-slate-400' : 'bg-amber-50 text-amber-700'
+      );
+    }
+    if (video.creatorName && video.creatorUrl) {
+      addBadge('誘導ボタン個別設定', 'bg-teal-50 text-teal-700');
+    }
+    if (video.ads) {
+      addBadge('広告個別設定', 'bg-teal-50 text-teal-700');
+    }
+    if (badgeRow.children.length) {
+      summary.appendChild(badgeRow);
+    }
+
+    card.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-4 pb-4';
 
     const linkRow = document.createElement('div');
     linkRow.className = 'flex gap-2';
@@ -373,9 +424,10 @@
     });
     linkRow.appendChild(copyBtn);
 
-    card.appendChild(linkRow);
-    card.appendChild(buildVideoTimeLimitSection(video));
-    card.appendChild(buildVideoAdsSection(video));
+    body.appendChild(linkRow);
+    body.appendChild(buildVideoTimeLimitSection(video));
+    body.appendChild(buildVideoCtaSection(video));
+    body.appendChild(buildVideoAdsSection(video));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -402,7 +454,8 @@
           alert('通信エラーが発生しました。');
         });
     });
-    card.appendChild(deleteBtn);
+    body.appendChild(deleteBtn);
+    card.appendChild(body);
 
     return card;
   }
@@ -450,6 +503,126 @@
         });
     });
     wrap.appendChild(toggleBtn);
+
+    return wrap;
+  }
+
+  function buildVideoCtaSection(video) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = (video.creatorName && video.creatorUrl)
+      ? `誘導ボタン: 個別設定中（${video.creatorName}を応援する）`
+      : '誘導ボタン: 既定を使用（個別設定する）';
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'flex flex-col gap-0.5';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'text-[11px] text-slate-500';
+    nameSpan.textContent = '出演者名';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 20;
+    nameInput.placeholder = '例: あかり';
+    if (video.creatorName) nameInput.value = video.creatorName;
+    nameInput.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    nameLabel.appendChild(nameSpan);
+    nameLabel.appendChild(nameInput);
+    body.appendChild(nameLabel);
+
+    const urlLabel = document.createElement('label');
+    urlLabel.className = 'flex flex-col gap-0.5';
+    const urlSpan = document.createElement('span');
+    urlSpan.className = 'text-[11px] text-slate-500';
+    urlSpan.textContent = '本人のFantia URL';
+    const urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.placeholder = 'https://fantia.jp/fanclubs/...';
+    if (video.creatorUrl) urlInput.value = video.creatorUrl;
+    urlInput.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    urlLabel.appendChild(urlSpan);
+    urlLabel.appendChild(urlInput);
+    body.appendChild(urlLabel);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-2';
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'この動画に適用';
+    applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+    applyBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+
+      fetch('/api/videos/set-cta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: video.id,
+          creatorName: nameInput.value,
+          creatorUrl: urlInput.value,
+        }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    });
+    btnRow.appendChild(applyBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.textContent = '既定に戻す';
+    resetBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
+    resetBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+
+      fetch('/api/videos/set-cta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: video.id, creatorName: null, creatorUrl: null }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    });
+    btnRow.appendChild(resetBtn);
+
+    body.appendChild(btnRow);
+    wrap.appendChild(body);
 
     return wrap;
   }

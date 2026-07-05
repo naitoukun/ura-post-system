@@ -15,6 +15,7 @@
 - POST /api/videos/delete  動画の削除（JSON）※要ログイン
 - POST /api/videos/set-ads  動画ごとの広告A/B個別設定の更新・解除（JSON）※要ログイン
 - POST /api/videos/set-time-limit  動画ごとの24時間限定設定の有効/無効切り替え（JSON）※要ログイン
+- POST /api/videos/set-cta  動画ごとの出演者名+Fantia URLの更新・解除（JSON）※要ログイン
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-ads     既定（動画に個別設定が無い場合用）の広告A/Bと表示比率の更新（JSON）※要ログイン
@@ -77,6 +78,12 @@ TIME_LIMIT_SECONDS = 24 * 60 * 60
 DEFAULT_PREMIUM_LINK = "https://fantia.jp/"
 DEFAULT_PREMIUM_BUTTON_TEXT = "【ファン限定】Fantia特設ページへ"
 MAX_BUTTON_TEXT_LENGTH = 60
+
+# 動画ごとに「出演者名」+「本人のFantia URL」を設定すると、誘導ボタンの文字を
+# 「{name}を応援する」に、リンク先をそのURLに個別上書きできる。
+# 両方セットされていない場合は、既定(DEFAULT_PREMIUM_LINK等)にフォールバックする。
+CREATOR_BUTTON_TEXT_TEMPLATE = "{name}を応援する"
+MAX_CREATOR_NAME_LENGTH = 20
 
 # サイト全体共通のA/B広告設定。実際のi-mobile等のSDKはまだ繋いでいないため、
 # ad_code は今のところ「将来SDKに渡すための識別子」を自由記述で保存するだけの欄。
@@ -175,6 +182,24 @@ def mark_first_access(video, videos_list):
         save_videos(videos_list)
 
 
+def get_effective_cta(video, config):
+    """誘導ボタンのリンク先・文字を返す。
+
+    動画に出演者名+URLの個別設定があればそれを、無ければサイト全体の既定値を使う。
+    """
+    name = video.get("creator_name")
+    url = video.get("creator_url")
+    if name and url:
+        return {
+            "premiumLink": url,
+            "premiumButtonText": CREATOR_BUTTON_TEXT_TEMPLATE.format(name=name),
+        }
+    return {
+        "premiumLink": config["premium_link"],
+        "premiumButtonText": config["premium_button_text"],
+    }
+
+
 def _totp_code_at(secret_b32, counter, digits=6):
     """RFC 6238 (TOTP) の計算。secret_b32はGoogle Authenticator等と同じBase32形式。"""
     padded = secret_b32.upper() + "=" * ((8 - len(secret_b32) % 8) % 8)
@@ -249,6 +274,22 @@ def validate_ads_payload(ads_input):
         return None, "invalid_ad_weight"
 
     return new_ads, None
+
+
+def validate_creator_cta(name, url):
+    """動画ごとの出演者名+Fantia URLのバリデーション。
+
+    成功時は (name, url, None) を、失敗時は (None, None, error_code) を返す。
+    """
+    name = (name or "").strip()
+    url = (url or "").strip()
+
+    if not name or len(name) > MAX_CREATOR_NAME_LENGTH:
+        return None, None, "invalid_creator_name"
+    if not re.match(r"^https?://", url):
+        return None, None, "invalid_creator_url"
+
+    return name, url, None
 
 
 def parse_multipart(body: bytes, boundary: bytes):
@@ -401,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
                 "uploadedAt": v["uploaded_at"],
                 "ads": [serialize_ad(ad) for ad in v["ads"]] if v.get("ads") else None,
                 "timeLimit": get_time_limit_status(v),
+                "creatorName": v.get("creator_name"),
+                "creatorUrl": v.get("creator_url"),
             }
             for v in videos
         ]
@@ -431,6 +474,7 @@ class Handler(BaseHTTPRequestHandler):
 
         config = load_config()
         effective_ads = video.get("ads") or config["ads"]
+        cta = get_effective_cta(video, config)
 
         self.respond_json(200, {
             "exists": True,
@@ -440,6 +484,8 @@ class Handler(BaseHTTPRequestHandler):
             "uploadedAt": video["uploaded_at"],
             "ads": [serialize_ad(ad) for ad in effective_ads],
             "timeLimit": get_time_limit_status(video),
+            "premiumLink": cta["premiumLink"],
+            "premiumButtonText": cta["premiumButtonText"],
         })
 
     def handle_serve_video(self, video_id):
@@ -542,6 +588,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_time_limit()
+        elif path == "/api/videos/set-cta":
+            if self.require_auth():
+                return
+            self.handle_set_video_cta()
         elif path == "/api/set-premium-link":
             if self.require_auth():
                 return
@@ -716,6 +766,46 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True, "timeLimit": get_time_limit_status(video)})
 
+    def handle_set_video_cta(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        videos = load_videos()
+        video = next((v for v in videos if v["id"] == data.get("id")), None)
+        if not video:
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        name_input = data.get("creatorName")
+        url_input = data.get("creatorUrl")
+
+        if name_input is None and url_input is None:
+            # 両方null(未指定)は「個別設定を解除して既定に戻す」の意味
+            video.pop("creator_name", None)
+            video.pop("creator_url", None)
+            save_videos(videos)
+            self.respond_json(200, {"ok": True, "creatorName": None, "creatorUrl": None})
+            return
+
+        name, url, error = validate_creator_cta(name_input, url_input)
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        video["creator_name"] = name
+        video["creator_url"] = url
+        save_videos(videos)
+
+        self.respond_json(200, {"ok": True, "creatorName": name, "creatorUrl": url})
+
     def handle_upload(self):
         content_type_header = self.headers.get("Content-Type", "")
         boundary_match = re.search(r"boundary=(.+)", content_type_header)
@@ -744,6 +834,17 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
             return
 
+        # 出演者名+Fantia URLは任意入力。どちらか一方でも入力されていれば両方揃っているか検証する
+        creator_name_input = fields.get("creatorName", "").strip()
+        creator_url_input = fields.get("creatorUrl", "").strip()
+        creator_fields = {}
+        if creator_name_input or creator_url_input:
+            name, url, error = validate_creator_cta(creator_name_input, creator_url_input)
+            if error:
+                self.respond_json(400, {"ok": False, "error": error})
+                return
+            creator_fields = {"creator_name": name, "creator_url": url}
+
         video_id = secrets.token_urlsafe(9)
         stored_filename = video_id + ext
         time_limit_enabled = fields.get("timeLimitEnabled") in ("1", "true", "on")
@@ -758,6 +859,7 @@ class Handler(BaseHTTPRequestHandler):
             "original_filename": original_filename,
             "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "time_limit_enabled": time_limit_enabled,
+            **creator_fields,
         })
         save_videos(videos)
 

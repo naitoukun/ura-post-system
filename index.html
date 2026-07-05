@@ -154,7 +154,7 @@
       rel="noopener noreferrer"
       class="btn-premium w-full text-center py-4 rounded-xl text-base sm:text-lg font-bold tracking-wide block"
     >
-      続きをプレミアム会場（Fantia）で見る
+      【ファン限定】Fantia特設ページへ
     </a>
   </div>
 
@@ -204,7 +204,7 @@
   // 管理画面(/admin)からリンクが設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_LINK = 'https://fantia.jp/';
   // 管理画面(/admin)からボタンの文字が設定されていない場合のフォールバック
-  const FALLBACK_PREMIUM_BUTTON_TEXT = '続きをプレミアム会場（Fantia）で見る';
+  const FALLBACK_PREMIUM_BUTTON_TEXT = '【ファン限定】Fantia特設ページへ';
   // URLに ?v=<動画ID> が付いていれば、その動画を優先的に表示する
   // （個別のシェア用リンクを動画ごとに使い分けるため）。指定が無ければ最新の動画を表示する。
   const requestedVideoId = new URLSearchParams(location.search).get('v');

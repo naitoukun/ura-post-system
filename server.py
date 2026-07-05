@@ -75,7 +75,7 @@ ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 TIME_LIMIT_SECONDS = 24 * 60 * 60
 
 DEFAULT_PREMIUM_LINK = "https://fantia.jp/"
-DEFAULT_PREMIUM_BUTTON_TEXT = "続きをプレミアム会場（Fantia）で見る"
+DEFAULT_PREMIUM_BUTTON_TEXT = "【ファン限定】Fantia特設ページへ"
 MAX_BUTTON_TEXT_LENGTH = 60
 
 # サイト全体共通のA/B広告設定。実際のi-mobile等のSDKはまだ繋いでいないため、

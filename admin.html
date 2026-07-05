@@ -188,9 +188,12 @@
 
 <script>
 (function () {
-  // 動画ごとの個別広告設定で、まだ個別設定が無い場合の広告Aコードの初期値
-  // （サイト既定の広告Aとして普段使っているVASTタグ）。
+  // 動画ごとの個別広告設定で、まだ個別設定が無い場合の初期値
+  // （サイト既定の広告Aとして普段使っているVASTタグ・比率）。
+  const DEFAULT_AD1_LABEL = 'メイン広告';
   const DEFAULT_AD1_CODE = 'https://s.magsrv.com/v1/vast.php?idz=5967416';
+  const DEFAULT_AD1_WEIGHT = 70;
+  const DEFAULT_AD2_WEIGHT = 30;
 
   const uploadForm  = document.getElementById('uploadForm');
   const submitBtn   = document.getElementById('submitBtn');
@@ -399,6 +402,7 @@
       badgeRow.appendChild(badge);
     }
 
+    addBadge('視聴回数: ' + (video.viewCount || 0), 'bg-slate-100 text-slate-500');
     if (video.timeLimit && video.timeLimit.enabled) {
       addBadge(
         video.timeLimit.expired ? '24時間限定: 期限切れ' : '24時間限定: 有効',
@@ -678,17 +682,20 @@
       return input;
     }
 
-    // まだ個別設定が無い動画では、広告Aコードのみサイト既定でよく使う値を
-    // 初期値として入れておく（個別設定が既にある場合はその保存値をそのまま尊重する）。
-    const ad1CodeDefault = existing[0] ? existing[0].adCode : DEFAULT_AD1_CODE;
+    // まだ個別設定が無い動画では、普段よく使う値を初期値として入れておく
+    // （個別設定が既にある場合はその保存値をそのまま尊重する）。
+    const ad1LabelDefault = existing[0] ? existing[0].label : DEFAULT_AD1_LABEL;
+    const ad1CodeDefault  = existing[0] ? existing[0].adCode : DEFAULT_AD1_CODE;
+    const ad1WeightDefault= existing[0] ? existing[0].weight : DEFAULT_AD1_WEIGHT;
+    const ad2WeightDefault= existing[1] ? existing[1].weight : DEFAULT_AD2_WEIGHT;
 
-    const ad1LabelInput = makeField('広告A ラベル', '広告A', 'text', existing[0] && existing[0].label);
+    const ad1LabelInput = makeField('広告A ラベル', '広告A', 'text', ad1LabelDefault);
     const ad1CodeInput  = makeField('広告A コード（任意）', '', 'text', ad1CodeDefault);
-    const ad1WeightInput= makeField('広告A 表示比率（%）', '70', 'number', existing[0] && existing[0].weight);
+    const ad1WeightInput= makeField('広告A 表示比率（%）', '70', 'number', ad1WeightDefault);
 
     const ad2LabelInput = makeField('広告B ラベル', '広告B', 'text', existing[1] && existing[1].label);
     const ad2CodeInput  = makeField('広告B コード（任意）', '', 'text', existing[1] && existing[1].adCode);
-    const ad2WeightInput= makeField('広告B 表示比率（%）', '30', 'number', existing[1] && existing[1].weight);
+    const ad2WeightInput= makeField('広告B 表示比率（%）', '30', 'number', ad2WeightDefault);
 
     const msg = document.createElement('p');
     msg.className = 'text-xs min-h-[1em]';

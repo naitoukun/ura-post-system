@@ -455,6 +455,7 @@ class Handler(BaseHTTPRequestHandler):
                 "timeLimit": get_time_limit_status(v),
                 "creatorName": v.get("creator_name"),
                 "creatorUrl": v.get("creator_url"),
+                "viewCount": v.get("view_count", 0),
             }
             for v in videos
         ]
@@ -504,6 +505,11 @@ class Handler(BaseHTTPRequestHandler):
         if get_time_limit_status(video)["expired"]:
             self.respond_json(200, {"exists": True, "expired": True})
             return
+
+        # モザイク越しのロック画面が表示された回数を視聴回数としてカウントする
+        # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)
+        video["view_count"] = video.get("view_count", 0) + 1
+        save_videos(videos_list)
 
         config = load_config()
         effective_ads = video.get("ads") or config["ads"]

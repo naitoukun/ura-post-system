@@ -3,15 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Secret Viewer</title>
+<title>ura-post.com</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --accent-teal:#14b8a6;
-    --accent-teal-dark:#0d9488;
-    --bg-page:#f4f7fa;
+    /* Xアカウント(@urapost_info)のバナー・アイコンの配色に合わせたトーン */
+    --accent-teal:#7fccc0;
+    --accent-teal-dark:#4a9d90;
+    --bg-page:#faf3ea;
   }
   html,body{
     background:var(--bg-page);
@@ -26,16 +27,16 @@
 
   .card{
     background:#ffffff;
-    border:1px solid #e7edf3;
-    box-shadow:0 4px 16px rgba(15,45,60,0.06);
+    border:1px solid #efe6d8;
+    box-shadow:0 4px 16px rgba(120,90,50,0.08);
     transition:transform .15s ease, box-shadow .15s ease;
   }
   .card:hover{
     transform:translateY(-2px);
-    box-shadow:0 8px 22px rgba(15,45,60,0.1);
+    box-shadow:0 8px 22px rgba(120,90,50,0.12);
   }
   .thumb-canvas{
-    background:linear-gradient(135deg,#eef2f6,#e2e8f0);
+    background:linear-gradient(135deg,#f3ece0,#ece0cf);
   }
   .hidden-el{ display:none !important; }
 
@@ -52,7 +53,7 @@
 
   <div class="flex flex-col items-center gap-1">
     <h1 class="brand text-3xl sm:text-4xl text-slate-800 text-center whitespace-nowrap">
-      Secret<span class="brand-accent">Viewer</span>
+      URA-POST<span class="brand-accent">.COM</span>
     </h1>
     <p class="text-xs text-slate-400 tracking-wide">広告視聴でコンテンツをアンロック</p>
   </div>

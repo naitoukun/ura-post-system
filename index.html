@@ -3,17 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Secret Viewer</title>
+<title>ura-post.com</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --accent-teal:#14b8a6;
-    --accent-teal-dark:#0d9488;
-    --accent-coral:#fb7185;
-    --accent-coral-dark:#f43f5e;
-    --bg-page:#f4f7fa;
+    /* Xアカウント(@urapost_info)のバナー・アイコンの配色(クリーム×ネイビー×ミント×ダスティピンク)に合わせたトーン */
+    --accent-teal:#7fccc0;
+    --accent-teal-dark:#4a9d90;
+    --accent-coral:#f4a7bf;
+    --accent-coral-dark:#e2799c;
+    --bg-page:#faf3ea;
   }
   html,body{
     background:var(--bg-page);
@@ -23,13 +24,13 @@
 
   .card{
     background:#ffffff;
-    border:1px solid #e7edf3;
-    box-shadow:0 4px 20px rgba(15,45,60,0.06);
+    border:1px solid #efe6d8;
+    box-shadow:0 4px 20px rgba(120,90,50,0.08);
   }
 
   @keyframes soft-pulse-teal{
-    0%,100%{ box-shadow:0 6px 16px rgba(20,184,166,0.35); transform:scale(1); }
-    50%{ box-shadow:0 10px 26px rgba(20,184,166,0.55); transform:scale(1.02); }
+    0%,100%{ box-shadow:0 6px 16px rgba(74,157,144,0.35); transform:scale(1); }
+    50%{ box-shadow:0 10px 26px rgba(74,157,144,0.55); transform:scale(1.02); }
   }
   .btn-primary{
     background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
@@ -38,12 +39,12 @@
     transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
   }
   .btn-primary:active{ transform:scale(0.98); }
-  .btn-primary:hover{ box-shadow:0 8px 20px rgba(20,184,166,0.45); }
+  .btn-primary:hover{ box-shadow:0 8px 20px rgba(74,157,144,0.45); }
   .btn-primary:disabled{ animation:none; opacity:.6; }
 
   @keyframes soft-pulse{
-    0%,100%{ box-shadow:0 6px 16px rgba(244,63,94,0.28); transform:scale(1); }
-    50%{ box-shadow:0 8px 22px rgba(244,63,94,0.4); transform:scale(1.015); }
+    0%,100%{ box-shadow:0 6px 16px rgba(226,121,156,0.28); transform:scale(1); }
+    50%{ box-shadow:0 8px 22px rgba(226,121,156,0.4); transform:scale(1.015); }
   }
   .btn-premium{
     animation:soft-pulse 2.4s ease-in-out infinite;
@@ -54,8 +55,8 @@
   /* 動画再生中は控えめなグレーにして、再生し終わった瞬間に目立つ色へ切り替える */
   .btn-premium.btn-muted{
     animation:none;
-    background:#e2e8f0;
-    color:#94a3b8;
+    background:#ece3d6;
+    color:#a89a86;
     box-shadow:none;
   }
 
@@ -78,7 +79,7 @@
   .hidden-el{ display:none !important; }
 
   #overlay{
-    background:rgba(244,247,250,0.92);
+    background:rgba(250,243,234,0.92);
     backdrop-filter:blur(6px);
   }
 
@@ -105,7 +106,7 @@
   <!-- タイトル -->
   <div class="flex flex-col items-center gap-1">
     <h1 class="brand text-3xl sm:text-4xl text-slate-800 text-center whitespace-nowrap">
-      Secret<span class="brand-accent">Viewer</span>
+      URA-POST<span class="brand-accent">.COM</span>
     </h1>
     <p class="text-xs text-slate-400 tracking-wide">広告視聴でコンテンツをアンロック</p>
   </div>
@@ -187,7 +188,7 @@
 
 <!-- 広告シミュレーション用オーバーレイ -->
 <div id="overlay" class="hidden-el fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-6">
-  <svg class="spin w-10 h-10 text-teal-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg class="spin w-10 h-10" style="color:var(--accent-teal-dark);" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="42 100"/>
   </svg>
   <p class="text-lg sm:text-xl font-bold text-slate-700 text-center">

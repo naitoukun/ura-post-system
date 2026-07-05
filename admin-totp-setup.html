@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2段階認証セットアップ | Secret Viewer</title>
+<title>2段階認証セットアップ | ura-post.com</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -44,7 +44,7 @@
   <form id="setupForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <label class="flex flex-col gap-1">
       <span class="text-sm font-medium text-slate-700">ラベル（認証アプリでの表示名）</span>
-      <input type="text" name="label" value="Secret Viewer Admin" required
+      <input type="text" name="label" value="ura-post.com Admin" required
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
 
@@ -84,7 +84,7 @@
     // Base32はスペース区切りで書かれることもあるため、表示用の空白を取り除く
     const secret = (formData.get('secret') || '').replace(/\s+/g, '').toUpperCase();
 
-    const issuer = 'SecretViewer';
+    const issuer = 'ura-post.com';
     const otpauthUrl =
       'otpauth://totp/' + encodeURIComponent(issuer) + ':' + encodeURIComponent(label) +
       '?secret=' + encodeURIComponent(secret) +

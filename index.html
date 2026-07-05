@@ -27,15 +27,19 @@
     box-shadow:0 4px 20px rgba(15,45,60,0.06);
   }
 
+  @keyframes soft-pulse-teal{
+    0%,100%{ box-shadow:0 6px 16px rgba(20,184,166,0.35); transform:scale(1); }
+    50%{ box-shadow:0 10px 26px rgba(20,184,166,0.55); transform:scale(1.02); }
+  }
   .btn-primary{
     background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
     color:#ffffff;
-    box-shadow:0 6px 16px rgba(20,184,166,0.35);
+    animation:soft-pulse-teal 2.2s ease-in-out infinite;
     transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
   }
   .btn-primary:active{ transform:scale(0.98); }
   .btn-primary:hover{ box-shadow:0 8px 20px rgba(20,184,166,0.45); }
-  .btn-primary:disabled{ opacity:.6; }
+  .btn-primary:disabled{ animation:none; opacity:.6; }
 
   @keyframes soft-pulse{
     0%,100%{ box-shadow:0 6px 16px rgba(244,63,94,0.28); transform:scale(1); }

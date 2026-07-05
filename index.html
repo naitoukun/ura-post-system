@@ -45,6 +45,14 @@
     animation:soft-pulse 2.4s ease-in-out infinite;
     background:linear-gradient(180deg,var(--accent-coral),var(--accent-coral-dark));
     color:#ffffff;
+    transition:background .4s ease, box-shadow .4s ease;
+  }
+  /* 動画再生中は控えめなグレーにして、再生し終わった瞬間に目立つ色へ切り替える */
+  .btn-premium.btn-muted{
+    animation:none;
+    background:#e2e8f0;
+    color:#94a3b8;
+    box-shadow:none;
   }
 
   @keyframes breathe{
@@ -152,9 +160,9 @@
       href="#"
       target="_blank"
       rel="noopener noreferrer"
-      class="btn-premium w-full text-center py-4 rounded-xl text-base sm:text-lg font-bold tracking-wide block"
+      class="btn-premium btn-muted w-full text-center py-4 rounded-xl text-base sm:text-lg font-bold tracking-wide block"
     >
-      【ファン限定】Fantia特設ページへ
+      ♥ 【ファン限定】Fantia特設ページへ ♥
     </a>
   </div>
 
@@ -232,7 +240,7 @@
     startTeaserPreview(info.url);
 
     premiumLink.href = info.premiumLink || FALLBACK_PREMIUM_LINK;
-    premiumLink.textContent = info.premiumButtonText || FALLBACK_PREMIUM_BUTTON_TEXT;
+    premiumLink.textContent = '♥ ' + (info.premiumButtonText || FALLBACK_PREMIUM_BUTTON_TEXT) + ' ♥';
 
     if (info.timeLimit && info.timeLimit.enabled && info.timeLimit.expiresAtEpoch) {
       startCountdown(info.timeLimit.expiresAtEpoch);
@@ -311,6 +319,14 @@
     unlockedArea.classList.remove('hidden-el');
 
     stopTeaserPreview();
+
+    // 再生中はボタンを目立たせず、動画が最後まで再生され終わった瞬間に
+    // 目立つ色（既存のパルスアニメーション）へ切り替える。視聴後の一番
+    // 「次の行動を探している」タイミングで注目を集めるための演出。
+    premiumLink.classList.add('btn-muted');
+    mainVideo.addEventListener('ended', () => {
+      premiumLink.classList.remove('btn-muted');
+    }, { once: true });
 
     videoInfoPromise.then((info) => {
       mainVideo.src = info.url;

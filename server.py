@@ -9,7 +9,7 @@
 - GET  /terms           利用規約
 - GET  /disclaimer      免責事項
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
-- GET  /og-image.png    SNSシェア時のOGP/Twitterカード用サイト共通ブランド画像
+- GET  /og-image        SNSシェア時のOGP/Twitterカード用画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
@@ -23,6 +23,8 @@
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-ads     既定（動画に個別設定が無い場合用）の広告A/Bと表示比率の更新（JSON）※要ログイン
+- POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
+- POST /api/reset-og-image  OGP画像を同梱の既定画像に戻す（JSON）※要ログイン
 
 ※「要ログイン」の操作は、/api/login で発行されたセッションCookieが無いと401になる。
 
@@ -75,6 +77,12 @@ SESSIONS = {}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
 ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 
+# SNSシェア時のOGP/Twitterカード画像。管理画面から差し替えが無い場合は
+# BASE_DIR直下の同梱デフォルト画像を使う。差し替え分は永続ディスク(UPLOAD_DIR)に保存する。
+DEFAULT_OG_IMAGE_PATH = os.path.join(BASE_DIR, "og-image.png")
+OG_IMAGE_ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_OG_IMAGE_BYTES = 5 * 1024 * 1024  # 5MB
+
 # 「URL発行時」ではなく「誰かが初めてそのURLにアクセスした時刻」を起点にするため、
 # 動画ごとに first_accessed_at (初回アクセス時刻) を記録し、そこから24時間で期限切れにする。
 TIME_LIMIT_SECONDS = 24 * 60 * 60
@@ -109,12 +117,14 @@ def load_config():
             "premium_link": DEFAULT_PREMIUM_LINK,
             "premium_button_text": DEFAULT_PREMIUM_BUTTON_TEXT,
             "ads": json.loads(json.dumps(DEFAULT_ADS)),
+            "og_image_filename": None,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
     config.setdefault("premium_link", DEFAULT_PREMIUM_LINK)
     config.setdefault("premium_button_text", DEFAULT_PREMIUM_BUTTON_TEXT)
     config.setdefault("ads", json.loads(json.dumps(DEFAULT_ADS)))
+    config.setdefault("og_image_filename", None)
     return config
 
 
@@ -412,9 +422,8 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "disclaimer.html"), "text/html; charset=utf-8")
         elif path == "/copyright-policy":
             self.serve_file(os.path.join(BASE_DIR, "copyright-policy.html"), "text/html; charset=utf-8")
-        elif path == "/og-image.png":
-            # SNSシェア時のOGP/Twitterカード用サイト共通ブランド画像
-            self.serve_file(os.path.join(BASE_DIR, "og-image.png"), "image/png")
+        elif path == "/og-image":
+            self.handle_serve_og_image()
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -434,6 +443,7 @@ class Handler(BaseHTTPRequestHandler):
             "premiumLink": config["premium_link"],
             "premiumButtonText": config["premium_button_text"],
             "ads": [serialize_ad(ad) for ad in config["ads"]],
+            "hasCustomOgImage": bool(config.get("og_image_filename")),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -580,6 +590,17 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_serve_og_image(self):
+        config = load_config()
+        filename = config.get("og_image_filename")
+        if filename:
+            custom_path = os.path.join(UPLOAD_DIR, filename)
+            if os.path.exists(custom_path):
+                content_type = mimetypes.guess_type(custom_path)[0] or "application/octet-stream"
+                self.serve_file(custom_path, content_type)
+                return
+        self.serve_file(DEFAULT_OG_IMAGE_PATH, "image/png")
+
     # ---------- POST ----------
     def do_POST(self):
         path = urlsplit(self.path).path
@@ -615,6 +636,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_ads()
+        elif path == "/api/set-og-image":
+            if self.require_auth():
+                return
+            self.handle_set_og_image()
+        elif path == "/api/reset-og-image":
+            if self.require_auth():
+                return
+            self.handle_reset_og_image()
         else:
             self.send_error(404, "Not Found")
 
@@ -908,6 +937,62 @@ class Handler(BaseHTTPRequestHandler):
 
         videos = [v for v in load_videos() if v["id"] != video_id]
         save_videos(videos)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_set_og_image(self):
+        content_type_header = self.headers.get("Content-Type", "")
+        boundary_match = re.search(r"boundary=(.+)", content_type_header)
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        if not content_type_header.startswith("multipart/form-data") or not boundary_match:
+            self.respond_json(400, {"ok": False, "error": "invalid_content_type"})
+            return
+
+        if content_length <= 0 or content_length > MAX_OG_IMAGE_BYTES:
+            self.respond_json(413, {"ok": False, "error": "file_too_large"})
+            return
+
+        boundary = boundary_match.group(1).strip('"').encode("utf-8")
+        body = self.rfile.read(content_length)
+        _, files = parse_multipart(body, boundary)
+
+        image_file = files.get("ogImage")
+        if not image_file:
+            self.respond_json(400, {"ok": False, "error": "missing_image_field"})
+            return
+
+        ext = os.path.splitext(image_file["filename"] or "")[1].lower()
+        if ext not in OG_IMAGE_ALLOWED_EXTENSIONS:
+            self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+            return
+
+        # 拡張子が変わった場合に前の差し替え画像が残らないよう、既存分は一旦削除する
+        config = load_config()
+        old_filename = config.get("og_image_filename")
+        if old_filename:
+            old_path = os.path.join(UPLOAD_DIR, old_filename)
+            if os.path.exists(old_path):
+                os.remove(old_path)
+
+        new_filename = "og-image" + ext
+        with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
+            f.write(image_file["content"])
+
+        config["og_image_filename"] = new_filename
+        save_config(config)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_reset_og_image(self):
+        config = load_config()
+        old_filename = config.get("og_image_filename")
+        if old_filename:
+            old_path = os.path.join(UPLOAD_DIR, old_filename)
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        config["og_image_filename"] = None
+        save_config(config)
 
         self.respond_json(200, {"ok": True})
 

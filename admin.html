@@ -184,6 +184,32 @@
 
     <p id="adsResultMsg" class="text-sm"></p>
   </form>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">OGP画像設定</h2>
+    <p class="text-xs text-slate-400 mt-1">動画リンクをSNS等でシェアした時に表示されるカード画像です（動画の中身とは無関係の、サイト共通のブランド画像）。png/jpg/webp、5MBまで。</p>
+  </div>
+
+  <div class="card rounded-2xl p-4 flex flex-col gap-3">
+    <img id="ogImagePreview" src="/og-image" alt="OGP画像プレビュー" class="w-full max-w-xs rounded-lg border border-slate-100" />
+    <p id="ogImageStatusText" class="text-xs text-slate-400">状態を確認しています…</p>
+  </div>
+
+  <form id="ogImageForm" class="card rounded-2xl p-4 flex flex-col gap-3">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">画像ファイル</span>
+      <input type="file" name="ogImage" accept="image/png,image/jpeg,image/webp" required class="text-sm" />
+    </label>
+    <div class="flex gap-2">
+      <button type="submit" id="ogImageSubmitBtn" class="flex-1 btn-primary rounded-lg py-3 text-sm font-bold">
+        アップロード
+      </button>
+      <button type="button" id="ogImageResetBtn" class="flex-1 border border-slate-200 text-slate-500 rounded-lg py-3 text-sm font-medium hover:bg-slate-50">
+        デフォルトに戻す
+      </button>
+    </div>
+    <p id="ogImageResultMsg" class="text-sm"></p>
+  </form>
 </div>
 
 <script>
@@ -214,6 +240,13 @@
   const adsResultMsg = document.getElementById('adsResultMsg');
   const logoutBtn    = document.getElementById('logoutBtn');
 
+  const ogImagePreview  = document.getElementById('ogImagePreview');
+  const ogImageStatusText = document.getElementById('ogImageStatusText');
+  const ogImageForm     = document.getElementById('ogImageForm');
+  const ogImageSubmitBtn= document.getElementById('ogImageSubmitBtn');
+  const ogImageResetBtn = document.getElementById('ogImageResetBtn');
+  const ogImageResultMsg= document.getElementById('ogImageResultMsg');
+
   // セッション切れ(401)の場合は、ログイン画面に戻す
   function redirectIfUnauthenticated(status) {
     if (status === 401) {
@@ -232,6 +265,77 @@
   refreshVideoList();
   refreshLinkStatus();
   refreshAdsStatus();
+  refreshOgImageStatus();
+
+  function refreshOgImageStatus() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        ogImageStatusText.textContent = data.hasCustomOgImage
+          ? '現在: アップロード済みの画像を使用中'
+          : '現在: デフォルト画像を使用中';
+        ogImagePreview.src = '/og-image?t=' + Date.now();
+      })
+      .catch(() => {
+        ogImageStatusText.textContent = '状態の取得に失敗しました。';
+      });
+  }
+
+  ogImageForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    ogImageResultMsg.textContent = '';
+    ogImageResultMsg.className = 'text-sm';
+    ogImageSubmitBtn.disabled = true;
+
+    const formData = new FormData(ogImageForm);
+
+    fetch('/api/set-og-image', { method: 'POST', body: formData })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        ogImageSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          ogImageResultMsg.textContent = '更新しました。';
+          ogImageResultMsg.classList.add('text-teal-600');
+          ogImageForm.reset();
+          refreshOgImageStatus();
+        } else {
+          ogImageResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          ogImageResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        ogImageSubmitBtn.disabled = false;
+        ogImageResultMsg.textContent = '通信エラーが発生しました。';
+        ogImageResultMsg.classList.add('text-rose-500');
+      });
+  });
+
+  ogImageResetBtn.addEventListener('click', function () {
+    ogImageResultMsg.textContent = '';
+    ogImageResultMsg.className = 'text-sm';
+    ogImageResetBtn.disabled = true;
+
+    fetch('/api/reset-og-image', { method: 'POST' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        ogImageResetBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          ogImageResultMsg.textContent = 'デフォルトに戻しました。';
+          ogImageResultMsg.classList.add('text-teal-600');
+          refreshOgImageStatus();
+        } else {
+          ogImageResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          ogImageResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        ogImageResetBtn.disabled = false;
+        ogImageResultMsg.textContent = '通信エラーが発生しました。';
+        ogImageResultMsg.classList.add('text-rose-500');
+      });
+  });
 
   function refreshAdsStatus() {
     fetch('/site-config', { cache: 'no-store' })

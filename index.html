@@ -103,6 +103,30 @@
 </head>
 <body class="min-h-screen w-full flex items-center justify-center p-4">
 
+<!-- 年齢確認ゲート。一度「はい」を選ぶとlocalStorageに記録し、同じ端末・同じブラウザでは以後表示しない -->
+<div id="ageGateOverlay" class="fixed inset-0 z-[100] flex items-center justify-center p-4" style="background:var(--bg-page);">
+  <div class="card rounded-2xl p-6 max-w-sm w-full text-center flex flex-col gap-4">
+    <p class="text-sm font-bold text-slate-700">当サイトはアダルトコンテンツを含みます</p>
+    <p class="text-xs text-slate-400">18歳未満の方のご利用はお断りしております。あなたは18歳以上ですか？</p>
+    <div class="flex gap-2">
+      <button id="ageGateYes" type="button" class="btn-primary flex-1 rounded-xl py-3 text-sm font-bold">
+        はい（18歳以上です）
+      </button>
+      <button id="ageGateNo" type="button" class="flex-1 border border-slate-200 text-slate-500 rounded-xl py-3 text-sm font-medium hover:bg-slate-50">
+        いいえ
+      </button>
+    </div>
+  </div>
+</div>
+<script>
+  // 描画直後、可能な限り早いタイミングでチェックしてチラつきを防ぐ
+  (function () {
+    if (localStorage.getItem('ageVerified') === '1') {
+      document.getElementById('ageGateOverlay').classList.add('hidden-el');
+    }
+  })();
+</script>
+
 <div class="w-full max-w-md mx-auto flex flex-col items-center gap-5 py-6">
 
   <!-- タイトル -->
@@ -232,6 +256,17 @@
   const adContentEl   = document.getElementById('adContentEl');
   const adContainerEl = document.getElementById('adContainerEl');
   const adLoadingState= document.getElementById('adLoadingState');
+  const ageGateOverlay= document.getElementById('ageGateOverlay');
+  const ageGateYes    = document.getElementById('ageGateYes');
+  const ageGateNo     = document.getElementById('ageGateNo');
+
+  ageGateYes.addEventListener('click', () => {
+    localStorage.setItem('ageVerified', '1');
+    ageGateOverlay.classList.add('hidden-el');
+  });
+  ageGateNo.addEventListener('click', () => {
+    location.href = 'https://www.google.com/';
+  });
 
   // 広告コードが未設定、またはVASTタグがエラー/フィル無しだった場合のフォールバック待機時間
   // （実際の広告は尺が広告ごとに異なり、終了タイミングはSDK側のコールバックで通知されるため、

@@ -97,11 +97,10 @@ MAX_BUTTON_TEXT_LENGTH = 60
 CREATOR_BUTTON_TEXT_TEMPLATE = "{name}を応援する"
 MAX_CREATOR_NAME_LENGTH = 20
 
-# サイト全体共通のA/B広告設定。実際のi-mobile等のSDKはまだ繋いでいないため、
-# ad_code は今のところ「将来SDKに渡すための識別子」を自由記述で保存するだけの欄。
+# サイト全体共通のA/B広告設定。ad_code はGoogle IMA SDKに渡すVASTタグURL。
 DEFAULT_ADS = [
-    {"id": "ad1", "label": "広告A", "ad_code": "https://s.magsrv.com/v1/vast.php?idz=5967416", "weight": 70},
-    {"id": "ad2", "label": "広告B", "ad_code": "", "weight": 30},
+    {"id": "ad1", "label": "広告A", "ad_code": "https://s.magsrv.com/v1/vast.php?idz=5967416", "weight": 15},
+    {"id": "ad2", "label": "広告B", "ad_code": "", "weight": 85},
 ]
 MAX_AD_LABEL_LENGTH = 40
 MAX_AD_CODE_LENGTH = 2000

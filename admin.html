@@ -132,7 +132,7 @@
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">広告A/B設定（既定）</h2>
-    <p class="text-xs text-slate-400 mt-1">個別設定の無い動画に使われる、サイト全体の既定の広告と比率です（実際の広告SDKは未接続のため、広告コード欄は将来の実装用のメモです）。動画ごとに変えたい場合は、上の「アップロード済み動画」一覧から個別設定できます。</p>
+    <p class="text-xs text-slate-400 mt-1">個別設定の無い動画に使われる、サイト全体の既定の広告と比率です（広告コードはGoogle IMA SDKに渡すVASTタグURL）。動画ごとに変えたい場合は、上の「アップロード済み動画」一覧から個別設定できます。</p>
   </div>
 
   <div id="adsStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
@@ -148,13 +148,13 @@
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
       <label class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">広告コード（任意・将来のSDK用メモ）</span>
-        <input type="text" name="ad1Code" maxlength="2000" placeholder="例: i-mobileのスポットIDなど"
+        <span class="text-sm font-medium text-slate-700">広告コード（VASTタグURL）</span>
+        <input type="text" name="ad1Code" maxlength="2000" placeholder="例: https://s.magsrv.com/v1/vast.php?idz=..."
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
       <label class="flex flex-col gap-1">
         <span class="text-sm font-medium text-slate-700">表示比率（%）</span>
-        <input type="number" name="ad1Weight" required min="0" max="100" step="1" placeholder="70"
+        <input type="number" name="ad1Weight" required min="0" max="100" step="1" placeholder="15"
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
     </div>
@@ -167,13 +167,13 @@
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
       <label class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">広告コード（任意・将来のSDK用メモ）</span>
-        <input type="text" name="ad2Code" maxlength="2000" placeholder="例: i-mobileのスポットIDなど"
+        <span class="text-sm font-medium text-slate-700">広告コード（VASTタグURL）</span>
+        <input type="text" name="ad2Code" maxlength="2000" placeholder="例: https://s.magsrv.com/v1/vast.php?idz=..."
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
       <label class="flex flex-col gap-1">
         <span class="text-sm font-medium text-slate-700">表示比率（%）</span>
-        <input type="number" name="ad2Weight" required min="0" max="100" step="1" placeholder="30"
+        <input type="number" name="ad2Weight" required min="0" max="100" step="1" placeholder="85"
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
     </div>
@@ -218,8 +218,8 @@
   // （サイト既定の広告Aとして普段使っているVASTタグ・比率）。
   const DEFAULT_AD1_LABEL = 'メイン広告';
   const DEFAULT_AD1_CODE = 'https://s.magsrv.com/v1/vast.php?idz=5967416';
-  const DEFAULT_AD1_WEIGHT = 70;
-  const DEFAULT_AD2_WEIGHT = 30;
+  const DEFAULT_AD1_WEIGHT = 15;
+  const DEFAULT_AD2_WEIGHT = 85;
 
   const uploadForm  = document.getElementById('uploadForm');
   const submitBtn   = document.getElementById('submitBtn');

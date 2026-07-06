@@ -9,6 +9,7 @@
 - GET  /terms           利用規約
 - GET  /disclaimer      免責事項
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
+- GET  /og-image.png    SNSシェア時のOGP/Twitterカード用サイト共通ブランド画像
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
@@ -411,6 +412,9 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "disclaimer.html"), "text/html; charset=utf-8")
         elif path == "/copyright-policy":
             self.serve_file(os.path.join(BASE_DIR, "copyright-policy.html"), "text/html; charset=utf-8")
+        elif path == "/og-image.png":
+            # SNSシェア時のOGP/Twitterカード用サイト共通ブランド画像
+            self.serve_file(os.path.join(BASE_DIR, "og-image.png"), "image/png")
         elif path == "/api/videos":
             if self.require_auth():
                 return

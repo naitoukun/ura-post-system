@@ -424,6 +424,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         split = urlsplit(self.path)
         path = split.path
+        # 末尾のスラッシュ有無で別ルート扱いになり404になるのを防ぐ(例: /admin/ → /admin)
+        if len(path) > 1 and path.endswith("/"):
+            path = path.rstrip("/")
         if path == "/":
             # TOP(素のURL)は共有リンク専用。個別の?v=<動画ID>を知っている相手だけが
             # 動画にたどり着ける状態にし、他の動画への回遊(一覧からの流出)は作らない。

@@ -11,6 +11,7 @@
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
 - GET  /og-image        SNSシェア時のOGP/Twitterカード用サイト共通画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
 - GET  /thumb/<id>      動画ごとに設定した個別サムネイル（未設定ならそもそも参照されない）
+- GET  /stats/<token>   クリエイター向けの視聴データページ（ログイン不要。共有リンクとは別トークン）
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
@@ -48,6 +49,7 @@ TODO: 本番運用前に以下を必ず対応すること
 import base64
 import hmac
 import hashlib
+import html
 import json
 import mimetypes
 import os
@@ -202,6 +204,20 @@ def mark_first_access(video, videos_list):
     if video.get("time_limit_enabled") and not video.get("first_accessed_at"):
         video["first_accessed_at"] = time.time()
         save_videos(videos_list)
+
+
+def get_stats_token(video, videos_list):
+    """クリエイター向け視聴データページ(/stats/<token>)用のトークンを返す。
+
+    共有リンク(動画ID)とは別物にすることで、視聴用リンクを知っている一般の
+    視聴者に統計を見せない・逆に統計リンクから動画本編を見られないようにする。
+    既存動画(このトークン導入前にアップロードされたもの)には無いので、
+    無ければここで発行して保存する。
+    """
+    if not video.get("stats_token"):
+        video["stats_token"] = secrets.token_urlsafe(9)
+        save_videos(videos_list)
+    return video["stats_token"]
 
 
 def get_effective_cta(video, config):
@@ -434,6 +450,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_serve_og_image()
         elif path.startswith("/thumb/"):
             self.handle_serve_thumbnail(path[len("/thumb/"):])
+        elif path.startswith("/stats/"):
+            self.handle_serve_creator_stats(path[len("/stats/"):])
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -475,6 +493,7 @@ class Handler(BaseHTTPRequestHandler):
                 "creatorUrl": v.get("creator_url"),
                 "viewCount": v.get("view_count", 0),
                 "hasCustomThumbnail": bool(v.get("og_image_filename")),
+                "statsToken": get_stats_token(v, videos),
             }
             for v in videos
         ]
@@ -624,6 +643,40 @@ class Handler(BaseHTTPRequestHandler):
             return
         content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
         self.serve_file(path, content_type)
+
+    def handle_serve_creator_stats(self, token):
+        videos_list = load_videos()
+        video = next((v for v in videos_list if v.get("stats_token") == token), None)
+        if not video:
+            self.send_error(404, "Not Found")
+            return
+
+        with open(os.path.join(BASE_DIR, "creator-stats.html"), "r", encoding="utf-8") as f:
+            page_html = f.read()
+
+        time_limit = get_time_limit_status(video)
+        if not time_limit["enabled"]:
+            status_text = "無期限で公開中"
+        elif time_limit["expired"]:
+            status_text = "期限切れ（非公開）"
+        else:
+            status_text = "24時間限定リンクで公開中"
+
+        creator_name = video.get("creator_name")
+        heading = (html.escape(creator_name) + "さんの視聴データ") if creator_name else "視聴データ"
+
+        page_html = page_html.replace("{{HEADING}}", heading)
+        page_html = page_html.replace("{{VIEW_COUNT}}", str(video.get("view_count", 0)))
+        page_html = page_html.replace("{{UPLOADED_AT}}", html.escape(video["uploaded_at"]))
+        page_html = page_html.replace("{{STATUS_TEXT}}", status_text)
+
+        body = page_html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。
@@ -1040,6 +1093,7 @@ class Handler(BaseHTTPRequestHandler):
             "original_filename": original_filename,
             "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "time_limit_enabled": time_limit_enabled,
+            "stats_token": secrets.token_urlsafe(9),
             **creator_fields,
         })
         save_videos(videos)

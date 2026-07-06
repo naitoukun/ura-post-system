@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>視聴データ | ura-post.com</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#7fccc0;
+    --accent-teal-dark:#4a9d90;
+    --bg-page:#faf3ea;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0;
+    background:var(--bg-page);
+    color:#333;
+    font-family:'Noto Sans JP',sans-serif;
+    min-height:100vh;
+  }
+  body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+  }
+  .card{
+    width:100%;
+    max-width:380px;
+    background:#ffffff;
+    border:1px solid #efe6d8;
+    box-shadow:0 4px 20px rgba(120,90,50,0.08);
+    border-radius:20px;
+    padding:32px 28px;
+    text-align:center;
+  }
+  h1{
+    font-size:16px;
+    font-weight:700;
+    color:#222;
+    margin:0 0 24px;
+  }
+  .count-label{
+    font-size:12px;
+    color:#94a3b8;
+    margin:0 0 4px;
+  }
+  .count{
+    font-family:'Outfit','Noto Sans JP',sans-serif;
+    font-weight:800;
+    font-size:56px;
+    line-height:1;
+    color:var(--accent-teal-dark);
+    margin:0 0 28px;
+  }
+  .row{
+    display:flex;
+    justify-content:space-between;
+    padding:10px 0;
+    border-top:1px solid #f4efe6;
+    font-size:13px;
+  }
+  .row span:first-child{ color:#94a3b8; }
+  .row span:last-child{ color:#333; font-weight:500; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>{{HEADING}}</h1>
+  <p class="count-label">視聴回数</p>
+  <p class="count">{{VIEW_COUNT}}</p>
+  <div class="row"><span>アップロード日</span><span>{{UPLOADED_AT}}</span></div>
+  <div class="row"><span>状態</span><span>{{STATUS_TEXT}}</span></div>
+</div>
+</body>
+</html>

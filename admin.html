@@ -479,6 +479,7 @@
 
   function buildVideoCard(video) {
     const shareUrl = location.origin + '/?v=' + encodeURIComponent(video.id);
+    const statsUrl = location.origin + '/stats/' + encodeURIComponent(video.statsToken);
 
     const card = document.createElement('details');
     card.className = 'card rounded-2xl overflow-hidden';
@@ -553,7 +554,30 @@
     });
     linkRow.appendChild(copyBtn);
 
+    const statsRow = document.createElement('div');
+    statsRow.className = 'flex gap-2';
+
+    const statsInput = document.createElement('input');
+    statsInput.type = 'text';
+    statsInput.readOnly = true;
+    statsInput.value = statsUrl;
+    statsInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-600 bg-slate-50';
+    statsRow.appendChild(statsInput);
+
+    const statsCopyBtn = document.createElement('button');
+    statsCopyBtn.type = 'button';
+    statsCopyBtn.textContent = '統計リンクをコピー';
+    statsCopyBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    statsCopyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(statsUrl).then(() => {
+        statsCopyBtn.textContent = 'コピー済み';
+        setTimeout(() => { statsCopyBtn.textContent = '統計リンクをコピー'; }, 1500);
+      });
+    });
+    statsRow.appendChild(statsCopyBtn);
+
     body.appendChild(linkRow);
+    body.appendChild(statsRow);
     body.appendChild(buildVideoTimeLimitSection(video));
     body.appendChild(buildVideoCtaSection(video));
     body.appendChild(buildVideoAdsSection(video));

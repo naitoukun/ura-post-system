@@ -2,14 +2,15 @@
 シークレット・ビューア: 開発用の簡易バックエンド。
 
 - GET  /                動画アンロックページ(index.html)。共有リンク専用にするため
-                        一覧等は置かず、常にindex.htmlを返す
+                        一覧等は置かず、常にindex.htmlを返す。og:image等は?vに応じて動的に差し込む
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示)
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
 - GET  /terms           利用規約
 - GET  /disclaimer      免責事項
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
-- GET  /og-image        SNSシェア時のOGP/Twitterカード用画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
+- GET  /og-image        SNSシェア時のOGP/Twitterカード用サイト共通画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
+- GET  /thumb/<id>      動画ごとに設定した個別サムネイル（未設定ならそもそも参照されない）
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
@@ -20,6 +21,8 @@
 - POST /api/videos/set-ads  動画ごとの広告A/B個別設定の更新・解除（JSON）※要ログイン
 - POST /api/videos/set-time-limit  動画ごとの24時間限定設定の有効/無効切り替え（JSON）※要ログイン
 - POST /api/videos/set-cta  動画ごとの出演者名+Fantia URLの更新・解除（JSON）※要ログイン
+- POST /api/videos/set-thumbnail  動画ごとの個別サムネイル画像の設定（multipart/form-data）※要ログイン
+- POST /api/videos/reset-thumbnail  動画ごとの個別サムネイルを解除しサイト既定画像に戻す（JSON）※要ログイン
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-ads     既定（動画に個別設定が無い場合用）の広告A/Bと表示比率の更新（JSON）※要ログイン
@@ -33,6 +36,7 @@
   - UPLOAD_PASSPHRASE 管理者ログイン用のパスフレーズ（1つ目の要素）
   - TOTP_SECRET       管理者ログイン用の2段階認証シークレット（Base32。2つ目の要素）
   - UPLOAD_DIR        動画・設定ファイルの保存先（Renderでは永続ディスクのマウント先を指定）
+  - PUBLIC_SITE_URL   OGP画像等の絶対URL組み立てに使う公開ドメイン（未設定時は https://ura-post.com）
 
 TODO: 本番運用前に以下を必ず対応すること
   - UPLOAD_PASSPHRASE / TOTP_SECRET を推測されにくい値に変更する
@@ -79,9 +83,14 @@ ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 
 # SNSシェア時のOGP/Twitterカード画像。管理画面から差し替えが無い場合は
 # BASE_DIR直下の同梱デフォルト画像を使う。差し替え分は永続ディスク(UPLOAD_DIR)に保存する。
+# 動画ごとに個別のサムネイルを設定した場合は、その動画の共有リンクを開いた時だけ
+# サイト既定の代わりにそちらをOGP画像として使う(index.htmlを動的に組み立てて差し込む)。
 DEFAULT_OG_IMAGE_PATH = os.path.join(BASE_DIR, "og-image.png")
 OG_IMAGE_ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_OG_IMAGE_BYTES = 5 * 1024 * 1024  # 5MB
+# og:image等はSNS側のクローラーが絶対URLで取得するため、公開ドメインを固定で持っておく。
+# 別ドメインで動作確認する場合は環境変数で上書きできるようにしておく。
+PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://ura-post.com")
 
 # 「URL発行時」ではなく「誰かが初めてそのURLにアクセスした時刻」を起点にするため、
 # 動画ごとに first_accessed_at (初回アクセス時刻) を記録し、そこから24時間で期限切れにする。
@@ -402,10 +411,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             # TOP(素のURL)は共有リンク専用。個別の?v=<動画ID>を知っている相手だけが
             # 動画にたどり着ける状態にし、他の動画への回遊(一覧からの流出)は作らない。
-            self.serve_file(os.path.join(BASE_DIR, "index.html"), "text/html; charset=utf-8")
+            self.handle_serve_unlock_page(parse_qs(split.query))
         elif path == "/index.html":
             # 動画アンロックページへの直接アクセス用（?v=無しでも常にアプリを表示）
-            self.serve_file(os.path.join(BASE_DIR, "index.html"), "text/html; charset=utf-8")
+            self.handle_serve_unlock_page(parse_qs(split.query))
         elif path == "/admin" or path == "/admin.html":
             if self.is_authenticated():
                 self.serve_file(os.path.join(BASE_DIR, "admin.html"), "text/html; charset=utf-8")
@@ -423,6 +432,8 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "copyright-policy.html"), "text/html; charset=utf-8")
         elif path == "/og-image":
             self.handle_serve_og_image()
+        elif path.startswith("/thumb/"):
+            self.handle_serve_thumbnail(path[len("/thumb/"):])
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -463,6 +474,7 @@ class Handler(BaseHTTPRequestHandler):
                 "creatorName": v.get("creator_name"),
                 "creatorUrl": v.get("creator_url"),
                 "viewCount": v.get("view_count", 0),
+                "hasCustomThumbnail": bool(v.get("og_image_filename")),
             }
             for v in videos
         ]
@@ -600,6 +612,47 @@ class Handler(BaseHTTPRequestHandler):
                 return
         self.serve_file(DEFAULT_OG_IMAGE_PATH, "image/png")
 
+    def handle_serve_thumbnail(self, video_id):
+        video = find_video(video_id)
+        filename = video.get("og_image_filename") if video else None
+        if not filename:
+            self.send_error(404, "Not Found")
+            return
+        path = os.path.join(UPLOAD_DIR, filename)
+        if not os.path.exists(path):
+            self.send_error(404, "Not Found")
+            return
+        content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        self.serve_file(path, content_type)
+
+    def handle_serve_unlock_page(self, query):
+        """動画アンロックページ(index.html)を返す。
+
+        OGP画像は、共有リンク(?v=<id>)が指している動画に個別サムネイルが
+        設定されていればそれを、無ければサイト共通の既定画像を差し込む。
+        SNSのクローラーはJSを実行しないため、この差し込みはHTMLを返す
+        このタイミングでサーバー側にやっておく必要がある。
+        """
+        with open(os.path.join(BASE_DIR, "index.html"), "r", encoding="utf-8") as f:
+            html = f.read()
+
+        requested_id = (query.get("v") or [None])[0]
+        image_url = PUBLIC_SITE_URL + "/og-image"
+        if requested_id:
+            video = find_video(requested_id)
+            if video and video.get("og_image_filename"):
+                thumb_path = os.path.join(UPLOAD_DIR, video["og_image_filename"])
+                if os.path.exists(thumb_path):
+                    image_url = PUBLIC_SITE_URL + "/thumb/" + requested_id
+
+        html = html.replace("{{OG_IMAGE_URL}}", image_url)
+        body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     # ---------- POST ----------
     def do_POST(self):
         path = urlsplit(self.path).path
@@ -627,6 +680,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_video_cta()
+        elif path == "/api/videos/set-thumbnail":
+            if self.require_auth():
+                return
+            self.handle_set_video_thumbnail()
+        elif path == "/api/videos/reset-thumbnail":
+            if self.require_auth():
+                return
+            self.handle_reset_video_thumbnail()
         elif path == "/api/set-premium-link":
             if self.require_auth():
                 return
@@ -849,6 +910,83 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True, "creatorName": name, "creatorUrl": url})
 
+    def handle_set_video_thumbnail(self):
+        content_type_header = self.headers.get("Content-Type", "")
+        boundary_match = re.search(r"boundary=(.+)", content_type_header)
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        if not content_type_header.startswith("multipart/form-data") or not boundary_match:
+            self.respond_json(400, {"ok": False, "error": "invalid_content_type"})
+            return
+
+        if content_length <= 0 or content_length > MAX_OG_IMAGE_BYTES:
+            self.respond_json(413, {"ok": False, "error": "file_too_large"})
+            return
+
+        boundary = boundary_match.group(1).strip('"').encode("utf-8")
+        body = self.rfile.read(content_length)
+        fields, files = parse_multipart(body, boundary)
+
+        videos = load_videos()
+        video = next((v for v in videos if v["id"] == fields.get("id")), None)
+        if not video:
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        image_file = files.get("thumbnail")
+        if not image_file:
+            self.respond_json(400, {"ok": False, "error": "missing_image_field"})
+            return
+
+        ext = os.path.splitext(image_file["filename"] or "")[1].lower()
+        if ext not in OG_IMAGE_ALLOWED_EXTENSIONS:
+            self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+            return
+
+        # 拡張子が変わった場合に前のサムネイルが残らないよう、既存分は一旦削除する
+        old_filename = video.get("og_image_filename")
+        if old_filename:
+            old_path = os.path.join(UPLOAD_DIR, old_filename)
+            if os.path.exists(old_path):
+                os.remove(old_path)
+
+        new_filename = "thumb_" + video["id"] + ext
+        with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
+            f.write(image_file["content"])
+
+        video["og_image_filename"] = new_filename
+        save_videos(videos)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_reset_video_thumbnail(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        videos = load_videos()
+        video = next((v for v in videos if v["id"] == data.get("id")), None)
+        if not video:
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        old_filename = video.get("og_image_filename")
+        if old_filename:
+            old_path = os.path.join(UPLOAD_DIR, old_filename)
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        video.pop("og_image_filename", None)
+        save_videos(videos)
+
+        self.respond_json(200, {"ok": True})
+
     def handle_upload(self):
         content_type_header = self.headers.get("Content-Type", "")
         boundary_match = re.search(r"boundary=(.+)", content_type_header)
@@ -933,6 +1071,12 @@ class Handler(BaseHTTPRequestHandler):
         path = os.path.join(UPLOAD_DIR, video["stored_filename"])
         if os.path.exists(path):
             os.remove(path)
+
+        thumbnail_filename = video.get("og_image_filename")
+        if thumbnail_filename:
+            thumbnail_path = os.path.join(UPLOAD_DIR, thumbnail_filename)
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
 
         videos = [v for v in load_videos() if v["id"] != video_id]
         save_videos(videos)

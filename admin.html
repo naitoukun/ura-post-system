@@ -519,6 +519,9 @@
     if (video.ads) {
       addBadge('広告個別設定', 'bg-teal-50 text-teal-700');
     }
+    if (video.hasCustomThumbnail) {
+      addBadge('サムネイル個別設定', 'bg-teal-50 text-teal-700');
+    }
     if (badgeRow.children.length) {
       summary.appendChild(badgeRow);
     }
@@ -554,6 +557,7 @@
     body.appendChild(buildVideoTimeLimitSection(video));
     body.appendChild(buildVideoCtaSection(video));
     body.appendChild(buildVideoAdsSection(video));
+    body.appendChild(buildVideoThumbnailSection(video));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -729,6 +733,118 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: video.id, creatorName: null, creatorUrl: null }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    });
+    btnRow.appendChild(resetBtn);
+
+    body.appendChild(btnRow);
+    wrap.appendChild(body);
+
+    return wrap;
+  }
+
+  function buildVideoThumbnailSection(video) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = video.hasCustomThumbnail
+      ? 'サムネイル(OGP): 個別設定中'
+      : 'サムネイル(OGP): サイト既定を使用（個別設定する）';
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const preview = document.createElement('img');
+    preview.className = 'w-full max-w-[200px] rounded-lg border border-slate-100';
+    preview.alt = 'サムネイルプレビュー';
+    preview.src = (video.hasCustomThumbnail ? '/thumb/' + encodeURIComponent(video.id) : '/og-image') + '?t=' + Date.now();
+    body.appendChild(preview);
+
+    const fileLabel = document.createElement('label');
+    fileLabel.className = 'flex flex-col gap-0.5';
+    const fileSpan = document.createElement('span');
+    fileSpan.className = 'text-[11px] text-slate-500';
+    fileSpan.textContent = '画像ファイル（png/jpg/webp・5MBまで）';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/png,image/jpeg,image/webp';
+    fileInput.className = 'text-xs';
+    fileLabel.appendChild(fileSpan);
+    fileLabel.appendChild(fileInput);
+    body.appendChild(fileLabel);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-2';
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'この動画に適用';
+    applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+    applyBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+
+      if (!fileInput.files[0]) {
+        msg.textContent = '画像ファイルを選択してください。';
+        msg.classList.add('text-rose-500');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('id', video.id);
+      formData.append('thumbnail', fileInput.files[0]);
+
+      fetch('/api/videos/set-thumbnail', { method: 'POST', body: formData })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    });
+    btnRow.appendChild(applyBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.textContent = '既定に戻す';
+    resetBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
+    resetBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+
+      fetch('/api/videos/reset-thumbnail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: video.id }),
       })
         .then((res) => res.json().then((data) => ({ status: res.status, data })))
         .then(({ status, data }) => {

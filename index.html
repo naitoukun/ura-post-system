@@ -503,6 +503,7 @@
       if (info.contentType === 'image') {
         // 画像は「視聴し終わる」という概念が無いので、ミュート演出はせず
         // ギャラリーが開いたタイミングでそのまま目立つ色にする。
+        premiumLink.classList.remove('btn-muted');
         mainVideo.classList.add('hidden-el');
         imageGallery.classList.remove('hidden-el');
         imageGallery.innerHTML = '';

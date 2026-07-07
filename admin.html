@@ -1426,7 +1426,7 @@
 
     const summary = document.createElement('summary');
     summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
-    summary.textContent = '応援ボタンの文言: ♥ ' + (video.effectiveCtaButtonText || '') + ' ♥（直接指定する）';
+    summary.textContent = '応援ボタンの設定: ♥ ' + (video.effectiveCtaButtonText || '') + ' ♥（直接指定する）';
     wrap.appendChild(summary);
 
     const body = document.createElement('div');
@@ -1435,8 +1435,13 @@
     const hint = document.createElement('p');
     hint.className = 'text-[11px] text-slate-400';
     hint.textContent =
-      '上の「誘導ボタン」より優先されます。空欄なら、投稿者アカウントの表示名から自動生成した文言（無ければ既定文言）が使われます。';
+      '上の「誘導ボタン」より優先されます。文言が空欄なら、投稿者アカウントの表示名から自動生成した文言（無ければ既定文言）が使われます。リンク先が空欄なら、上の「誘導ボタン」のURL（無ければサイト既定リンク）が使われます。';
     body.appendChild(hint);
+
+    const textLabel = document.createElement('p');
+    textLabel.className = 'text-[11px] text-slate-500 font-medium';
+    textLabel.textContent = 'ボタンの文言';
+    body.appendChild(textLabel);
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -1446,6 +1451,19 @@
     input.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
     body.appendChild(input);
 
+    const linkLabel = document.createElement('p');
+    linkLabel.className = 'text-[11px] text-slate-500 font-medium mt-1';
+    linkLabel.textContent = 'ボタンのリンク先URL';
+    body.appendChild(linkLabel);
+
+    const linkInput = document.createElement('input');
+    linkInput.type = 'url';
+    linkInput.maxLength = 500;
+    linkInput.placeholder = '例: https://x.com/your_account';
+    if (video.ctaLinkUrl) linkInput.value = video.ctaLinkUrl;
+    linkInput.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    body.appendChild(linkInput);
+
     const msg = document.createElement('p');
     msg.className = 'text-xs min-h-[1em]';
     body.appendChild(msg);
@@ -1453,13 +1471,13 @@
     const btnRow = document.createElement('div');
     btnRow.className = 'flex gap-2';
 
-    function saveCtaText(value) {
+    function saveCtaText(textValue, linkValue) {
       msg.textContent = '';
       msg.className = 'text-xs min-h-[1em]';
       fetch('/api/videos/set-cta-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: video.id, ctaButtonText: value }),
+        body: JSON.stringify({ id: video.id, ctaButtonText: textValue, ctaLinkUrl: linkValue }),
       })
         .then((res) => res.json().then((data) => ({ status: res.status, data })))
         .then(({ status, data }) => {
@@ -1481,7 +1499,7 @@
     applyBtn.type = 'button';
     applyBtn.textContent = 'この投稿に適用';
     applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
-    applyBtn.addEventListener('click', () => saveCtaText(input.value));
+    applyBtn.addEventListener('click', () => saveCtaText(input.value, linkInput.value));
     btnRow.appendChild(applyBtn);
 
     const resetTextBtn = document.createElement('button');
@@ -1490,7 +1508,8 @@
     resetTextBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
     resetTextBtn.addEventListener('click', () => {
       input.value = '';
-      saveCtaText('');
+      linkInput.value = '';
+      saveCtaText('', '');
     });
     btnRow.appendChild(resetTextBtn);
 

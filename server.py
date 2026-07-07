@@ -26,7 +26,7 @@
 - POST /api/videos/set-ads  動画/画像ごとの広告個別設定の更新・解除（JSON）※要ログイン
 - POST /api/videos/set-time-limit  動画ごとの24時間限定設定の有効/無効切り替え（JSON）※要ログイン
 - POST /api/videos/set-cta  動画ごとの出演者名+Fantia URLの更新・解除（JSON）※要ログイン
-- POST /api/videos/set-cta-text  投稿ごとの誘導ボタン文言の直接個別指定・解除（JSON）※要ログイン
+- POST /api/videos/set-cta-text  投稿ごとの誘導ボタン文言・リンク先の直接個別指定・解除（JSON）※要ログイン
 - POST /api/videos/set-thumbnail  動画ごとの個別サムネイル画像の設定（multipart/form-data）※要ログイン
 - POST /api/videos/reset-thumbnail  動画ごとの個別サムネイルを解除しサイト既定画像に戻す（JSON）※要ログイン
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
@@ -47,7 +47,7 @@
 - POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は30秒以上・画像は5枚以上が必須。
                         1日あたりの合計アップロード件数にも上限あり）※要クリエイターログイン
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
-- POST /api/creator/content/set-cta-text  自分の投稿の誘導ボタン文言の個別指定・解除（所有者チェック有り、JSON）※要クリエイターログイン
+- POST /api/creator/content/set-cta-text  自分の投稿の誘導ボタン文言・リンク先の個別指定・解除（所有者チェック有り、JSON）※要クリエイターログイン
 - POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（最低申請ポイント数あり、JSON）※要クリエイターログイン
 - GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
 - POST /api/creators/invite  招待URL+ログインコードを新規発行（JSON）※要ログイン(管理者)
@@ -136,6 +136,7 @@ TIME_LIMIT_SECONDS = 24 * 60 * 60
 DEFAULT_PREMIUM_LINK = "https://fantia.jp/"
 DEFAULT_PREMIUM_BUTTON_TEXT = "【ファン限定】Fantia特設ページへ"
 MAX_BUTTON_TEXT_LENGTH = 60
+MAX_CTA_LINK_URL_LENGTH = 500
 
 # 動画ごとに「出演者名」+「本人のFantia URL」を設定すると、誘導ボタンの文字を
 # 「{name}を応援する」に、リンク先をそのURLに個別上書きできる。
@@ -439,6 +440,19 @@ def validate_cta_button_text(text):
     return text, None
 
 
+def validate_cta_link_url(url):
+    """投稿ごとの誘導ボタンのリンク先個別上書き。空文字/Noneは「未設定(自動)」として許可する。
+
+    成功時は (url_or_None, None) を、失敗時は (None, error_code) を返す。
+    """
+    url = (url or "").strip()
+    if not url:
+        return None, None
+    if len(url) > MAX_CTA_LINK_URL_LENGTH or not re.match(r"^https?://", url):
+        return None, "invalid_cta_link_url"
+    return url, None
+
+
 def get_effective_cta(video, config, creator=None):
     """誘導ボタンのリンク先・文字を返す。ボタンの文言は次の優先順位で決まる。
 
@@ -447,15 +461,18 @@ def get_effective_cta(video, config, creator=None):
     3. クリエイター自身の投稿(owner_creator_id有り)で、上記が無ければアカウントの表示名から自動生成
     4. どれも無ければサイト既定の文言
 
-    リンク先は、出演者名+URL個別設定(creator_url)があればそちら、無ければサイト既定のリンク。
-    文言だけの個別指定・表示名からの自動生成はリンク先には影響しない。
+    リンク先は次の優先順位で決まる。
+    1. 投稿ごとのリンク先個別指定(cta_link_url)
+    2. 出演者名+URL個別設定(creator_name+creator_url)がともにある場合、そのURL
+    3. どれも無ければサイト既定のリンク
     """
-    cta_override = video.get("cta_button_text")
+    cta_text_override = video.get("cta_button_text")
+    cta_link_override = video.get("cta_link_url")
     name = video.get("creator_name")
     url = video.get("creator_url")
 
-    if cta_override:
-        button_text = cta_override
+    if cta_text_override:
+        button_text = cta_text_override
     elif name and url:
         button_text = CREATOR_BUTTON_TEXT_TEMPLATE.format(name=name)
     elif creator and creator.get("display_name"):
@@ -463,8 +480,15 @@ def get_effective_cta(video, config, creator=None):
     else:
         button_text = config["premium_button_text"]
 
+    if cta_link_override:
+        premium_link = cta_link_override
+    elif name and url:
+        premium_link = url
+    else:
+        premium_link = config["premium_link"]
+
     return {
-        "premiumLink": url if (name and url) else config["premium_link"],
+        "premiumLink": premium_link,
         "premiumButtonText": button_text,
     }
 
@@ -1019,7 +1043,9 @@ class Handler(BaseHTTPRequestHandler):
                 ),
                 "pointsStatus": get_points_status(v, find_creator(creators, v.get("owner_creator_id")), config),
                 "ctaButtonText": v.get("cta_button_text"),
+                "ctaLinkUrl": v.get("cta_link_url"),
                 "effectiveCtaButtonText": get_effective_cta(v, config, find_creator(creators, v.get("owner_creator_id")))["premiumButtonText"],
+                "effectiveCtaLink": get_effective_cta(v, config, find_creator(creators, v.get("owner_creator_id")))["premiumLink"],
             }
             for v in videos
         ]
@@ -1660,13 +1686,23 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": error})
             return
 
+        cta_link, error = validate_cta_link_url(data.get("ctaLinkUrl"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
         if cta_text:
             video["cta_button_text"] = cta_text
         else:
             video.pop("cta_button_text", None)
+
+        if cta_link:
+            video["cta_link_url"] = cta_link
+        else:
+            video.pop("cta_link_url", None)
         save_videos(videos)
 
-        self.respond_json(200, {"ok": True, "ctaButtonText": cta_text})
+        self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
     def handle_set_video_thumbnail(self):
         content_type_header = self.headers.get("Content-Type", "")
@@ -2001,15 +2037,25 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": error})
             return
 
+        cta_link, error = validate_cta_link_url(data.get("ctaLinkUrl"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
         videos = load_videos()
         target = next((v for v in videos if v["id"] == video_id), None)
         if cta_text:
             target["cta_button_text"] = cta_text
         else:
             target.pop("cta_button_text", None)
+
+        if cta_link:
+            target["cta_link_url"] = cta_link
+        else:
+            target.pop("cta_link_url", None)
         save_videos(videos)
 
-        self.respond_json(200, {"ok": True, "ctaButtonText": cta_text})
+        self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
     def _delete_video_entry(self, video_id, video):
         """動画/画像ギャラリー本体・サムネイル・videos.json中のエントリを削除する共通処理。"""
@@ -2212,7 +2258,9 @@ class Handler(BaseHTTPRequestHandler):
                 "viewCount": v.get("view_count", 0),
                 "pointsStatus": get_points_status(v, creator, config),
                 "ctaButtonText": v.get("cta_button_text"),
+                "ctaLinkUrl": v.get("cta_link_url"),
                 "effectiveCtaButtonText": get_effective_cta(v, config, creator)["premiumButtonText"],
+                "effectiveCtaLink": get_effective_cta(v, config, creator)["premiumLink"],
             }
             for v in own_videos
         ]

@@ -63,7 +63,7 @@
     <span class="text-sm font-medium text-slate-700">Amazonギフト券への交換申請</span>
     <label class="flex flex-col gap-1">
       <span class="text-xs text-slate-500">申請するポイント数</span>
-      <input type="number" id="redemptionPointsInput" name="points" min="1" step="1" required placeholder="例: 500"
+      <input type="number" id="redemptionPointsInput" name="points" min="1" step="1" required placeholder="例: 150000"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
     <p id="redemptionMinHint" class="text-xs text-slate-400"></p>
@@ -163,7 +163,8 @@
     .then((res) => res.json())
     .then((data) => {
       if (data.minRedemptionPoints) {
-        redemptionMinHint.textContent = '最低' + data.minRedemptionPoints + 'ptから交換申請できます。';
+        redemptionMinHint.textContent =
+          '最低' + data.minRedemptionPoints.toLocaleString('ja-JP') + 'pt（' + data.minRedemptionPointsYen.toLocaleString('ja-JP') + '円分）から交換申請できます。';
         redemptionPointsInput.min = data.minRedemptionPoints;
       }
     })

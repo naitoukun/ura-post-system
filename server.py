@@ -180,8 +180,9 @@ DEFAULT_POINTS_PER_VIDEO_UPLOAD = 100
 DEFAULT_POINTS_PER_IMAGE_UPLOAD = 100
 DEFAULT_POINTS_VIEW_THRESHOLD = 10
 
-# ギフト券交換は最低このポイント数から申請可能(既定1500pt)。サイト全体共通、管理画面(ポイント設定)で変更可能。
-DEFAULT_MIN_REDEMPTION_POINTS = 1500
+# ギフト券交換は最低このポイント数から申請可能(既定150000pt = 1500円分。100pt=1円で換算)。
+# サイト全体共通、管理画面(ポイント設定)で変更可能。
+DEFAULT_MIN_REDEMPTION_POINTS = 150000
 
 # ポイント→円換算レート(100pt=1円)。DBには常に整数ポイントのみを保存し、
 # 円換算は表示のたびにこのレートで都度計算する(換算値自体は保存しない)。
@@ -958,6 +959,7 @@ class Handler(BaseHTTPRequestHandler):
             "pointsPerImageUpload": config.get("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD),
             "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
             "minRedemptionPoints": config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS),
+            "minRedemptionPointsYen": points_to_yen(config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")

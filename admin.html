@@ -170,6 +170,11 @@
       <input type="text" name="displayName" maxlength="40" placeholder="例: あかりさん"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">連絡先URL（SNS等・任意）</span>
+      <input type="url" name="contactUrl" placeholder="https://x.com/..."
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
     <button type="submit" id="inviteSubmitBtn" class="btn-primary rounded-lg py-2.5 text-sm font-bold">
       招待URLを発行する
     </button>
@@ -571,7 +576,10 @@
     fetch('/api/creators/invite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: formData.get('displayName') }),
+      body: JSON.stringify({
+        displayName: formData.get('displayName'),
+        contactUrl: formData.get('contactUrl'),
+      }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
       .then(({ status, data }) => {
@@ -708,6 +716,56 @@
     codeRow.className = 'text-xs text-slate-500';
     codeRow.textContent = 'ログインコード: ' + (creator.loginCode || '-');
     body.appendChild(codeRow);
+
+    // 連絡先リンク(SNS等)。ポイント交換の連絡等をすぐ取れるように別タブで開く
+    const contactWrap = document.createElement('div');
+    contactWrap.className = 'flex gap-2 items-center';
+
+    if (creator.contactUrl) {
+      const contactLink = document.createElement('a');
+      contactLink.href = creator.contactUrl;
+      contactLink.target = '_blank';
+      contactLink.rel = 'noopener noreferrer';
+      contactLink.textContent = '連絡先を開く ↗';
+      contactLink.className = 'shrink-0 border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+      contactWrap.appendChild(contactLink);
+    }
+
+    const contactInput = document.createElement('input');
+    contactInput.type = 'url';
+    contactInput.placeholder = '連絡先URL（SNS等）';
+    contactInput.value = creator.contactUrl || '';
+    contactInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    contactWrap.appendChild(contactInput);
+
+    const contactSaveBtn = document.createElement('button');
+    contactSaveBtn.type = 'button';
+    contactSaveBtn.textContent = '保存';
+    contactSaveBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    contactSaveBtn.addEventListener('click', () => {
+      contactSaveBtn.disabled = true;
+      fetch('/api/creators/set-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id, contactUrl: contactInput.value }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          contactSaveBtn.disabled = false;
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+          } else {
+            alert('更新に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          contactSaveBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    contactWrap.appendChild(contactSaveBtn);
+    body.appendChild(contactWrap);
 
     // 手動ポイント調整
     const adjustWrap = document.createElement('div');
@@ -930,14 +988,28 @@
     label.textContent = (creator.displayName || '（名前未設定）') + ' - ' + req.points + 'pt（' + req.requestedAt + '）';
     row.appendChild(label);
 
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'flex gap-2 shrink-0';
+
+    if (creator.contactUrl) {
+      const contactLink = document.createElement('a');
+      contactLink.href = creator.contactUrl;
+      contactLink.target = '_blank';
+      contactLink.rel = 'noopener noreferrer';
+      contactLink.textContent = '連絡先を開く ↗';
+      contactLink.className = 'border border-slate-200 text-slate-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-50';
+      btnGroup.appendChild(contactLink);
+    }
+
     const fulfillBtn = document.createElement('button');
     fulfillBtn.type = 'button';
     fulfillBtn.textContent = '対応済みにする';
-    fulfillBtn.className = 'shrink-0 border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+    fulfillBtn.className = 'border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
     fulfillBtn.addEventListener('click', () => {
       fulfillRedemptionRequest(creator.id, req.id, fulfillBtn);
     });
-    row.appendChild(fulfillBtn);
+    btnGroup.appendChild(fulfillBtn);
+    row.appendChild(btnGroup);
 
     return row;
   }

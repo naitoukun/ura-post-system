@@ -51,6 +51,7 @@
 - POST /api/creators/adjust-points  ポイント残高の手動調整（返金・是正用）※要ログイン(管理者)
 - POST /api/creators/fulfill-redemption  ギフト券交換申請を対応済みにする（JSON）※要ログイン(管理者)
 - POST /api/creators/set-points-override  クリエイターごとの動画/画像付与ポイントの個別上書き（null=サイト既定値を使用）（JSON）※要ログイン(管理者)
+- POST /api/creators/set-contact  クリエイターの連絡先リンク(SNS等)の設定・更新・解除（JSON）※要ログイン(管理者)
 - POST /api/creators/delete  クリエイターアカウントの削除（投稿済みの全コンテンツも連鎖削除）（JSON）※要ログイン(管理者)
 
 ※「要ログイン」の操作は、/api/login で発行されたセッションCookieが無いと401になる。
@@ -137,6 +138,10 @@ MAX_BUTTON_TEXT_LENGTH = 60
 # 両方セットされていない場合は、既定(DEFAULT_PREMIUM_LINK等)にフォールバックする。
 CREATOR_BUTTON_TEXT_TEMPLATE = "{name}を応援する"
 MAX_CREATOR_NAME_LENGTH = 20
+
+# クリエイター(女の子)ごとの連絡先リンク(SNS等)。管理者がポイント交換等の連絡を
+# 素早く取れるようにするための、管理画面上でのみ使うメモ用途のリンク。
+MAX_CONTACT_URL_LENGTH = 500
 
 # サイト全体共通のA/B広告設定。ad_code はGoogle IMA SDKに渡すVASTタグURL。
 DEFAULT_ADS = [
@@ -491,6 +496,19 @@ def validate_creator_cta(name, url):
         return None, None, "invalid_creator_url"
 
     return name, url, None
+
+
+def validate_contact_url(url):
+    """クリエイターの連絡先リンク(SNS等)のバリデーション。空文字/Noneは「未設定」として許可する。
+
+    成功時は (url_or_None, None) を、失敗時は (None, error_code) を返す。
+    """
+    url = (url or "").strip()
+    if not url:
+        return None, None
+    if len(url) > MAX_CONTACT_URL_LENGTH or not re.match(r"^https?://", url):
+        return None, "invalid_contact_url"
+    return url, None
 
 
 def _find_iso_bmff_box(data: bytes, target_types, start: int, end: int):
@@ -1280,6 +1298,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_set_points_override()
+        elif path == "/api/creators/set-contact":
+            if self.require_auth():
+                return
+            self.handle_creators_set_contact()
         elif path == "/api/creators/delete":
             if self.require_auth():
                 return
@@ -2089,6 +2111,7 @@ class Handler(BaseHTTPRequestHandler):
                 "activatedAt": c.get("activated_at"),
                 "pointsPerVideoUpload": c.get("points_per_video_upload"),
                 "pointsPerImageUpload": c.get("points_per_image_upload"),
+                "contactUrl": c.get("contact_url"),
             }
             for c in sorted(creators, key=lambda c: c.get("invited_at", ""), reverse=True)
         ]
@@ -2108,6 +2131,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         display_name = (data.get("displayName") or "").strip()[:40]
+        contact_url, error = validate_contact_url(data.get("contactUrl"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
 
         with CREATORS_LOCK:
             creators = load_creators()
@@ -2126,6 +2153,7 @@ class Handler(BaseHTTPRequestHandler):
                 "activated_at": None,
                 "points_per_video_upload": None,
                 "points_per_image_upload": None,
+                "contact_url": contact_url,
             }
             creators.append(creator)
             save_creators(creators)
@@ -2300,6 +2328,36 @@ class Handler(BaseHTTPRequestHandler):
             "pointsPerVideoUpload": video_override,
             "pointsPerImageUpload": image_override,
         })
+
+    def handle_creators_set_contact(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+        contact_url, error = validate_contact_url(data.get("contactUrl"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["contact_url"] = contact_url
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "contactUrl": contact_url})
 
     def handle_creators_delete(self):
         content_length = int(self.headers.get("Content-Length", 0))

@@ -215,8 +215,8 @@
   </form>
 
   <div>
-    <h2 class="text-lg font-bold text-slate-800">広告A/B設定（既定）</h2>
-    <p class="text-xs text-slate-400 mt-1">個別設定の無い動画に使われる、サイト全体の既定の広告と比率です（広告コードはGoogle IMA SDKに渡すVASTタグURL）。動画ごとに変えたい場合は、上の「アップロード済み動画」一覧から個別設定できます。</p>
+    <h2 class="text-lg font-bold text-slate-800">広告設定（既定）</h2>
+    <p class="text-xs text-slate-400 mt-1">個別設定の無いコンテンツに使われる、サイト全体の既定の広告です。動画は広告A、画像ギャラリーは広告Bを使います。動画/画像ごとに変えたい場合は、上の「アップロード済み動画」一覧から個別設定できます。</p>
   </div>
 
   <div id="adsStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
@@ -225,7 +225,7 @@
 
   <form id="adsForm" class="card rounded-2xl p-4 flex flex-col gap-5">
     <div class="flex flex-col gap-3 border border-slate-100 rounded-xl p-3">
-      <span class="text-xs font-bold text-slate-500">広告A</span>
+      <span class="text-xs font-bold text-slate-500">広告A（動画のアンロックに使用）</span>
       <label class="flex flex-col gap-1">
         <span class="text-sm font-medium text-slate-700">ラベル</span>
         <input type="text" name="ad1Label" required maxlength="40" placeholder="広告A"
@@ -236,28 +236,18 @@
         <input type="text" name="ad1Code" maxlength="2000" placeholder="例: https://s.magsrv.com/v1/vast.php?idz=..."
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
-      <label class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">表示比率（%）</span>
-        <input type="number" name="ad1Weight" required min="0" max="100" step="1" placeholder="15"
-          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-      </label>
     </div>
 
     <div class="flex flex-col gap-3 border border-slate-100 rounded-xl p-3">
-      <span class="text-xs font-bold text-slate-500">広告B</span>
+      <span class="text-xs font-bold text-slate-500">広告B（画像ギャラリーのアンロックに使用）</span>
       <label class="flex flex-col gap-1">
         <span class="text-sm font-medium text-slate-700">ラベル</span>
         <input type="text" name="ad2Label" required maxlength="40" placeholder="広告B"
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
       <label class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">広告コード（VASTタグURL）</span>
-        <input type="text" name="ad2Code" maxlength="2000" placeholder="例: https://s.magsrv.com/v1/vast.php?idz=..."
-          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-      </label>
-      <label class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">表示比率（%）</span>
-        <input type="number" name="ad2Weight" required min="0" max="100" step="1" placeholder="85"
+        <span class="text-sm font-medium text-slate-700">広告コード（ExoClickゾーンID）</span>
+        <input type="text" name="ad2Code" maxlength="2000" placeholder="例: 5968784（空欄なら既定のゾーンIDを使用）"
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
     </div>
@@ -299,11 +289,9 @@
 <script>
 (function () {
   // 動画ごとの個別広告設定で、まだ個別設定が無い場合の初期値
-  // （サイト既定の広告Aとして普段使っているVASTタグ・比率）。
+  // （サイト既定の広告Aとして普段使っているVASTタグ）。
   const DEFAULT_AD1_LABEL = 'メイン広告';
   const DEFAULT_AD1_CODE = 'https://s.magsrv.com/v1/vast.php?idz=5967416';
-  const DEFAULT_AD1_WEIGHT = 15;
-  const DEFAULT_AD2_WEIGHT = 85;
 
   const uploadForm  = document.getElementById('uploadForm');
   const submitBtn   = document.getElementById('submitBtn');
@@ -441,7 +429,7 @@
       .then((res) => res.json())
       .then((data) => {
         adsStatusBox.textContent = data.ads
-          .map((ad) => `${ad.label}: ${ad.weight}%${ad.adCode ? ' (' + ad.adCode + ')' : ''}`)
+          .map((ad) => `${ad.label}${ad.adCode ? ' (' + ad.adCode + ')' : '（未設定）'}`)
           .join(' / ');
 
         // フォームには常に現在保存されている値を表示する（更新後もこれで
@@ -450,12 +438,10 @@
         if (ad1) {
           adsForm.elements['ad1Label'].value = ad1.label;
           adsForm.elements['ad1Code'].value = ad1.adCode;
-          adsForm.elements['ad1Weight'].value = ad1.weight;
         }
         if (ad2) {
           adsForm.elements['ad2Label'].value = ad2.label;
           adsForm.elements['ad2Code'].value = ad2.adCode;
-          adsForm.elements['ad2Weight'].value = ad2.weight;
         }
       })
       .catch(() => {
@@ -479,12 +465,10 @@
           {
             label: formData.get('ad1Label'),
             adCode: formData.get('ad1Code'),
-            weight: Number(formData.get('ad1Weight')),
           },
           {
             label: formData.get('ad2Label'),
             adCode: formData.get('ad2Code'),
-            weight: Number(formData.get('ad2Weight')),
           },
         ],
       }),
@@ -1548,18 +1532,27 @@
   }
 
   function buildVideoAdsSection(video) {
+    const isImage = video.contentType === 'image';
+
     const wrap = document.createElement('details');
     wrap.className = 'text-xs border border-slate-100 rounded-lg';
 
     const summary = document.createElement('summary');
     summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
     summary.textContent = video.ads
-      ? `広告: 個別設定中（${video.ads[0].label} ${video.ads[0].weight}% / ${video.ads[1].label} ${video.ads[1].weight}%）`
+      ? `広告: 個別設定中（${video.ads[isImage ? 1 : 0].label}）`
       : '広告: 既定を使用（個別設定する）';
     wrap.appendChild(summary);
 
     const body = document.createElement('div');
     body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const note = document.createElement('p');
+    note.className = 'text-[11px] text-slate-400';
+    note.textContent = isImage
+      ? 'この画像ギャラリーには「広告B」のみが使われます（広告Aは無視されます）。'
+      : 'この動画には「広告A」のみが使われます（広告Bは無視されます）。';
+    body.appendChild(note);
 
     const existing = video.ads || [null, null];
 
@@ -1584,16 +1577,12 @@
     // （個別設定が既にある場合はその保存値をそのまま尊重する）。
     const ad1LabelDefault = existing[0] ? existing[0].label : DEFAULT_AD1_LABEL;
     const ad1CodeDefault  = existing[0] ? existing[0].adCode : DEFAULT_AD1_CODE;
-    const ad1WeightDefault= existing[0] ? existing[0].weight : DEFAULT_AD1_WEIGHT;
-    const ad2WeightDefault= existing[1] ? existing[1].weight : DEFAULT_AD2_WEIGHT;
 
     const ad1LabelInput = makeField('広告A ラベル', '広告A', 'text', ad1LabelDefault);
-    const ad1CodeInput  = makeField('広告A コード（任意）', '', 'text', ad1CodeDefault);
-    const ad1WeightInput= makeField('広告A 表示比率（%）', '70', 'number', ad1WeightDefault);
+    const ad1CodeInput  = makeField('広告A コード（VASTタグURL）', '', 'text', ad1CodeDefault);
 
     const ad2LabelInput = makeField('広告B ラベル', '広告B', 'text', existing[1] && existing[1].label);
-    const ad2CodeInput  = makeField('広告B コード（任意）', '', 'text', existing[1] && existing[1].adCode);
-    const ad2WeightInput= makeField('広告B 表示比率（%）', '30', 'number', ad2WeightDefault);
+    const ad2CodeInput  = makeField('広告B コード（ExoClickゾーンID）', '', 'text', existing[1] && existing[1].adCode);
 
     const msg = document.createElement('p');
     msg.className = 'text-xs min-h-[1em]';
@@ -1619,12 +1608,10 @@
             {
               label: ad1LabelInput.value,
               adCode: ad1CodeInput.value,
-              weight: Number(ad1WeightInput.value),
             },
             {
               label: ad2LabelInput.value,
               adCode: ad2CodeInput.value,
-              weight: Number(ad2WeightInput.value),
             },
           ],
         }),

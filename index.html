@@ -242,7 +242,7 @@
 
   <!-- 画像ギャラリーのアンロック時のみ表示(ExoClick AdProvider)。動画のadPlayerWrapとは排他的に切り替える -->
   <div id="imageAdWrap" class="hidden-el relative w-full max-w-md min-h-[250px] bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center gap-3 p-4">
-    <ins class="eas6a97888e33" data-zoneid="5968784"></ins>
+    <ins id="imageAdIns" class="eas6a97888e33" data-zoneid="5968784"></ins>
     <p id="imageAdCountdownText" class="text-xs text-white/80 text-center"></p>
   </div>
 
@@ -271,6 +271,7 @@
   const adContainerEl = document.getElementById('adContainerEl');
   const adLoadingState= document.getElementById('adLoadingState');
   const imageAdWrap   = document.getElementById('imageAdWrap');
+  const imageAdIns    = document.getElementById('imageAdIns');
   const imageAdCountdownText = document.getElementById('imageAdCountdownText');
   const ageGateOverlay= document.getElementById('ageGateOverlay');
   const ageGateYes    = document.getElementById('ageGateYes');
@@ -291,6 +292,8 @@
   // 画像ギャラリーは動画のような「視聴完了」イベントが無い広告(ExoClick AdProvider)を使うため、
   // 表示してから固定秒数後に自動でアンロックする。
   const IMAGE_AD_DISPLAY_MS = 3000;
+  // 画像側の広告コード(ExoClickゾーンID)が未設定の場合のフォールバック
+  const DEFAULT_IMAGE_AD_ZONE_ID = '5968784';
   // 管理画面(/admin)からリンクが設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_LINK = 'https://fantia.jp/';
   // 管理画面(/admin)からボタンの文字が設定されていない場合のフォールバック
@@ -418,18 +421,18 @@
     overlay.classList.remove('hidden-el');
     selectedAdDebug.textContent = '';
 
+    // 広告A(ads[0])=動画側、広告B(ads[1])=画像側に完全に振り分ける(A/Bランダム表示ではない)
+    const selectedAd = pickAdForContentType(siteAds, currentContentType);
+
     if (currentContentType === 'image') {
       adPlayerWrap.classList.add('hidden-el');
-      startImageAd();
+      startImageAd(selectedAd);
       return;
     }
 
     imageAdWrap.classList.add('hidden-el');
     adPlayerWrap.classList.remove('hidden-el');
     adLoadingState.classList.remove('hidden-el');
-
-    // 管理画面(/admin)の「広告A/B設定」の比率にもとづき、表示する広告を抽選する
-    const selectedAd = pickWeightedAd(siteAds);
 
     if (!selectedAd.adCode || typeof google === 'undefined' || !google.ima) {
       // 広告コード未設定、またはSDKが読み込めていない場合はそのままアンロックする
@@ -460,8 +463,9 @@
   // 画像ギャラリーのアンロック広告(ExoClick AdProvider)。
   // バナー/ネイティブ広告には動画のような「視聴完了」イベントが無いため、
   // 表示してから固定秒数(IMAGE_AD_DISPLAY_MS)後に自動でアンロックする。
-  function startImageAd() {
+  function startImageAd(selectedAd) {
     imageAdWrap.classList.remove('hidden-el');
+    imageAdIns.setAttribute('data-zoneid', (selectedAd && selectedAd.adCode) || DEFAULT_IMAGE_AD_ZONE_ID);
 
     (window.AdProvider = window.AdProvider || []).push({ serve: {} });
 
@@ -480,18 +484,10 @@
     }, IMAGE_AD_DISPLAY_MS);
   }
 
-  // weight（重み）に応じた確率で、ads配列から1つを抽選する。
-  // 例: weight 70 / 30 の2件なら、約70%/30%の確率でそれぞれ選ばれる。
-  function pickWeightedAd(ads) {
-    const totalWeight = ads.reduce((sum, ad) => sum + ad.weight, 0);
-    if (totalWeight <= 0) return ads[0];
-
-    let roll = Math.random() * totalWeight;
-    for (const ad of ads) {
-      roll -= ad.weight;
-      if (roll < 0) return ad;
-    }
-    return ads[ads.length - 1];
+  // 広告A(index 0)=動画側、広告B(index 1)=画像側に完全に振り分ける。
+  function pickAdForContentType(ads, contentType) {
+    const index = contentType === 'image' ? 1 : 0;
+    return ads[index] || ads[0] || { adCode: '' };
   }
 
   function onAdFinished() {

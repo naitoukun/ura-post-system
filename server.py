@@ -22,14 +22,14 @@
 - POST /api/upload      動画または画像ギャラリーのアップロード（multipart/form-data。
                         contentType=video/image。新規IDを発行）※要ログイン
 - POST /api/videos/delete  動画の削除（JSON）※要ログイン
-- POST /api/videos/set-ads  動画ごとの広告A/B個別設定の更新・解除（JSON）※要ログイン
+- POST /api/videos/set-ads  動画/画像ごとの広告個別設定の更新・解除（JSON）※要ログイン
 - POST /api/videos/set-time-limit  動画ごとの24時間限定設定の有効/無効切り替え（JSON）※要ログイン
 - POST /api/videos/set-cta  動画ごとの出演者名+Fantia URLの更新・解除（JSON）※要ログイン
 - POST /api/videos/set-thumbnail  動画ごとの個別サムネイル画像の設定（multipart/form-data）※要ログイン
 - POST /api/videos/reset-thumbnail  動画ごとの個別サムネイルを解除しサイト既定画像に戻す（JSON）※要ログイン
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
-- POST /api/set-ads     既定（動画に個別設定が無い場合用）の広告A/Bと表示比率の更新（JSON）※要ログイン
+- POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
 - POST /api/reset-og-image  OGP画像を同梱の既定画像に戻す（JSON）※要ログイン
@@ -143,10 +143,12 @@ MAX_CREATOR_NAME_LENGTH = 20
 # 素早く取れるようにするための、管理画面上でのみ使うメモ用途のリンク。
 MAX_CONTACT_URL_LENGTH = 500
 
-# サイト全体共通のA/B広告設定。ad_code はGoogle IMA SDKに渡すVASTタグURL。
+# サイト全体共通の広告設定。ad1は動画アンロック用(Google IMA SDKに渡すVASTタグURL)、
+# ad2は画像ギャラリーアンロック用(ExoClick AdProviderのゾーンID。空欄なら既定のゾーンIDを使う)。
+# 以前はA/Bランダム表示だったが、動画/画像で完全に振り分ける仕様に変更したため重みは廃止した。
 DEFAULT_ADS = [
-    {"id": "ad1", "label": "広告A", "ad_code": "https://s.magsrv.com/v1/vast.php?idz=5967416", "weight": 15},
-    {"id": "ad2", "label": "広告B", "ad_code": "", "weight": 85},
+    {"id": "ad1", "label": "動画側の広告", "ad_code": "https://s.magsrv.com/v1/vast.php?idz=5967416"},
+    {"id": "ad2", "label": "画像側の広告", "ad_code": ""},
 ]
 MAX_AD_LABEL_LENGTH = 40
 MAX_AD_CODE_LENGTH = 2000
@@ -434,7 +436,7 @@ def parse_cookies(cookie_header):
 
 
 def serialize_ad(ad):
-    return {"id": ad["id"], "label": ad["label"], "adCode": ad["ad_code"], "weight": ad["weight"]}
+    return {"id": ad["id"], "label": ad["label"], "adCode": ad["ad_code"]}
 
 
 def serialize_redemption_request(r):
@@ -448,10 +450,10 @@ def serialize_redemption_request(r):
 
 
 def validate_ads_payload(ads_input):
-    """広告A/B設定(2件固定)の共通バリデーション。
+    """広告設定(2件固定: ad1=動画用, ad2=画像用)の共通バリデーション。
 
     成功時は (ads_list, None) を、失敗時は (None, error_code) を返す。
-    サイト全体の既定設定・動画ごとの個別設定の両方から使い回す。
+    サイト全体の既定設定・動画/画像ごとの個別設定の両方から使い回す。
     """
     if not isinstance(ads_input, list) or len(ads_input) != 2:
         return None, "invalid_ads_count"
@@ -460,24 +462,17 @@ def validate_ads_payload(ads_input):
     for index, ad in enumerate(ads_input):
         label = (ad.get("label") or "").strip() if isinstance(ad, dict) else ""
         ad_code = (ad.get("adCode") or "").strip() if isinstance(ad, dict) else ""
-        weight = ad.get("weight") if isinstance(ad, dict) else None
 
         if not label or len(label) > MAX_AD_LABEL_LENGTH:
             return None, "invalid_ad_label"
         if len(ad_code) > MAX_AD_CODE_LENGTH:
             return None, "invalid_ad_code"
-        if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight < 0:
-            return None, "invalid_ad_weight"
 
         new_ads.append({
             "id": "ad" + str(index + 1),
             "label": label,
             "ad_code": ad_code,
-            "weight": weight,
         })
-
-    if sum(ad["weight"] for ad in new_ads) <= 0:
-        return None, "invalid_ad_weight"
 
     return new_ads, None
 

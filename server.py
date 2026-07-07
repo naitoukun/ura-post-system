@@ -57,6 +57,7 @@
 - POST /api/creators/fulfill-redemption  ギフト券交換申請を対応済みにする（JSON）※要ログイン(管理者)
 - POST /api/creators/set-points-override  クリエイターごとの動画/画像付与ポイントの個別上書き（null=サイト既定値を使用）（JSON）※要ログイン(管理者)
 - POST /api/creators/set-contact  クリエイターの連絡先リンク(SNS等)の設定・更新・解除（JSON）※要ログイン(管理者)
+- POST /api/creators/reset-password  クリエイターのパスワードを強制再発行(新パスワードを一度だけ返す)（JSON）※要ログイン(管理者)
 - GET  /api/creators/id-document  提出された身分証の画像/PDFの配信（機微情報のため管理者のみ）※要ログイン(管理者)
 - POST /api/creators/approve-id  提出された身分証を承認し、セルフアップロードを解禁する（JSON）※要ログイン(管理者)
 - POST /api/creators/reject-id  提出された身分証を却下する（理由は任意入力、JSON）※要ログイン(管理者)
@@ -1454,6 +1455,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_set_contact()
+        elif path == "/api/creators/reset-password":
+            if self.require_auth():
+                return
+            self.handle_creators_reset_password()
         elif path == "/api/creators/approve-id":
             if self.require_auth():
                 return
@@ -2742,6 +2747,44 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
 
         self.respond_json(200, {"ok": True, "contactUrl": contact_url})
+
+    def handle_creators_reset_password(self):
+        """本人がパスワードを忘れた場合に、管理者側から強制的にパスワードを再発行する。
+
+        ランダムな新パスワードを生成してハッシュ化・保存し、平文はこのレスポンスでのみ
+        一度だけ返す(サーバー側には平文を保持しない)。既存のログインセッションは念のため
+        (アカウント乗っ取り等の可能性も考慮し)すべて無効化する。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            new_password = secrets.token_urlsafe(9)
+            salt_hex, hash_hex = hash_password(new_password)
+            creator["password_salt"] = salt_hex
+            creator["password_hash"] = hash_hex
+            save_creators(creators)
+
+            for token in [t for t, s in CREATOR_SESSIONS.items() if s["creator_id"] == creator_id]:
+                del CREATOR_SESSIONS[token]
+
+        self.respond_json(200, {"ok": True, "newPassword": new_password})
 
     def handle_creators_id_document(self, query):
         """管理者のみが閲覧できる、クリエイター提出の身分証の配信。

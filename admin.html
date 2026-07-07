@@ -706,10 +706,67 @@
     const body = document.createElement('div');
     body.className = 'flex flex-col gap-3 px-4 pb-4';
 
-    const codeRow = document.createElement('p');
-    codeRow.className = 'text-xs text-slate-500';
-    codeRow.textContent = 'ログインコード: ' + (creator.loginCode || '-');
+    const codeRow = document.createElement('div');
+    codeRow.className = 'flex items-center justify-between gap-2';
+    const codeText = document.createElement('p');
+    codeText.className = 'text-xs text-slate-500';
+    codeText.textContent = 'ログインコード: ' + (creator.loginCode || '-');
+    codeRow.appendChild(codeText);
+
+    const resetPasswordBtn = document.createElement('button');
+    resetPasswordBtn.type = 'button';
+    resetPasswordBtn.textContent = 'パスワードをリセット';
+    resetPasswordBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    codeRow.appendChild(resetPasswordBtn);
     body.appendChild(codeRow);
+
+    const resetPasswordResultBox = document.createElement('div');
+    resetPasswordResultBox.className = 'hidden flex flex-col gap-1 border border-teal-100 rounded-lg p-2 bg-teal-50/40';
+    body.appendChild(resetPasswordResultBox);
+
+    resetPasswordBtn.addEventListener('click', () => {
+      if (!window.confirm(
+        (creator.displayName || '（名前未設定）') + ' さんのパスワードをリセットしますか？\n'
+        + '本人は今すぐログアウトされ、新しいパスワードでログインし直す必要があります。'
+      )) return;
+
+      resetPasswordBtn.disabled = true;
+      fetch('/api/creators/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          resetPasswordBtn.disabled = false;
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            resetPasswordResultBox.innerHTML = '';
+            resetPasswordResultBox.classList.remove('hidden');
+
+            const pwRow = document.createElement('div');
+            pwRow.className = 'flex gap-2';
+            const pwInput = document.createElement('input');
+            pwInput.type = 'text';
+            pwInput.readOnly = true;
+            pwInput.value = data.newPassword;
+            pwInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white';
+            pwRow.appendChild(pwInput);
+            resetPasswordResultBox.appendChild(pwRow);
+
+            const pwLabel = document.createElement('p');
+            pwLabel.className = 'text-xs text-slate-500';
+            pwLabel.textContent = '↑新しいパスワード（本人に伝えてください。この画面を閉じると二度と表示されません）';
+            resetPasswordResultBox.appendChild(pwLabel);
+          } else {
+            alert('リセットに失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          resetPasswordBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
 
     // 連絡先リンク(SNS等)。ポイント交換の連絡等をすぐ取れるように別タブで開く
     const contactWrap = document.createElement('div');

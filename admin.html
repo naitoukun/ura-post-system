@@ -680,7 +680,7 @@
       creator.status === 'active' ? 'アクティブ' : '招待中（未登録）',
       creator.status === 'active' ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'
     );
-    addBadge('残高: ' + (creator.pointsBalance || 0) + 'pt', 'bg-slate-100 text-slate-600');
+    addBadge('残高: ' + (creator.pointsBalance || 0).toLocaleString('ja-JP') + 'pt（' + (creator.pointsBalanceYen || 0).toLocaleString('ja-JP') + '円分）', 'bg-slate-100 text-slate-600');
 
     const pendingCount = (creator.redemptionRequests || []).filter((r) => r.status === 'pending').length;
     if (pendingCount) {
@@ -883,7 +883,7 @@
         row.className = 'flex items-center justify-between gap-2 border border-slate-100 rounded-lg px-3 py-2 text-xs';
 
         const label = document.createElement('span');
-        label.textContent = req.points + 'pt（' + req.requestedAt + '）'
+        label.textContent = req.points.toLocaleString('ja-JP') + 'pt（' + req.pointsYen.toLocaleString('ja-JP') + '円分・' + req.requestedAt + '）'
           + (req.status === 'fulfilled' ? ' - 対応済み' : ' - 申請中');
         row.appendChild(label);
 
@@ -969,7 +969,7 @@
 
     const label = document.createElement('span');
     label.className = 'text-slate-700';
-    label.textContent = (creator.displayName || '（名前未設定）') + ' - ' + req.points + 'pt（' + req.requestedAt + '）';
+    label.textContent = (creator.displayName || '（名前未設定）') + ' - ' + req.points.toLocaleString('ja-JP') + 'pt（' + req.pointsYen.toLocaleString('ja-JP') + '円分・' + req.requestedAt + '）';
     row.appendChild(label);
 
     const btnGroup = document.createElement('div');
@@ -1120,11 +1120,11 @@
     const ps = video.pointsStatus;
     if (ps) {
       if (ps.state === 'collecting') {
-        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt予定）', 'bg-slate-100 text-slate-500');
+        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', 'bg-slate-100 text-slate-500');
       } else if (ps.state === 'eligible_pending_approval') {
-        addBadge('ポイント承認待ち（+' + ps.amount + 'pt予定）', 'bg-rose-50 text-rose-600');
+        addBadge('ポイント承認待ち（+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', 'bg-rose-50 text-rose-600');
       } else if (ps.state === 'awarded') {
-        addBadge('ポイント付与済み（+' + ps.amount + 'pt）', 'bg-teal-50 text-teal-700');
+        addBadge('ポイント付与済み（+' + ps.amount + 'pt（' + ps.amountYen + '円分））', 'bg-teal-50 text-teal-700');
       } else if (ps.state === 'not_eligible') {
         addBadge('ポイント対象外（閲覧数未達）', 'bg-slate-100 text-slate-400');
       }
@@ -1188,7 +1188,7 @@
     if (ps && ps.state === 'eligible_pending_approval') {
       const approveBtn = document.createElement('button');
       approveBtn.type = 'button';
-      approveBtn.textContent = '承認して+' + ps.amount + 'pt付与';
+      approveBtn.textContent = '承認して+' + ps.amount + 'pt（' + ps.amountYen + '円分）付与';
       approveBtn.className = 'border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
       approveBtn.addEventListener('click', () => {
         approveBtn.disabled = true;

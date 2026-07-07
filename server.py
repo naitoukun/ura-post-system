@@ -183,6 +183,14 @@ DEFAULT_POINTS_VIEW_THRESHOLD = 10
 # ギフト券交換は最低このポイント数から申請可能(既定1500pt)。サイト全体共通、管理画面(ポイント設定)で変更可能。
 DEFAULT_MIN_REDEMPTION_POINTS = 1500
 
+# ポイント→円換算レート(100pt=1円)。DBには常に整数ポイントのみを保存し、
+# 円換算は表示のたびにこのレートで都度計算する(換算値自体は保存しない)。
+POINTS_PER_YEN = 100
+
+
+def points_to_yen(points):
+    return points // POINTS_PER_YEN
+
 # 低品質・水増し目的の投稿を防ぐための最低ライン。クリエイターのセルフアップロードにのみ適用し
 # (管理者自身の/api/uploadには適用しない)、満たさない場合はアップロード自体を拒否する。
 MIN_CREATOR_VIDEO_DURATION_SECONDS = 30
@@ -285,17 +293,19 @@ def get_points_status(video, creator, config):
     if not video.get("owner_creator_id"):
         return None
     if video.get("points_awarded"):
-        return {"state": "awarded", "amount": video.get("points_awarded_amount"), "viewCount": video.get("view_count", 0)}
+        amount = video.get("points_awarded_amount")
+        return {"state": "awarded", "amount": amount, "amountYen": points_to_yen(amount), "viewCount": video.get("view_count", 0)}
 
     window_end = video.get("uploaded_at_epoch", 0) + POINTS_WINDOW_SECONDS
     view_count = video.get("view_count", 0)
     threshold = config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
     amount = get_effective_points_amount(video, creator, config)
+    amount_yen = points_to_yen(amount)
 
     if time.time() < window_end:
-        return {"state": "collecting", "viewCount": view_count, "threshold": threshold, "windowEndsAt": window_end, "amount": amount}
+        return {"state": "collecting", "viewCount": view_count, "threshold": threshold, "windowEndsAt": window_end, "amount": amount, "amountYen": amount_yen}
     if view_count >= threshold:
-        return {"state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold, "amount": amount}
+        return {"state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold, "amount": amount, "amountYen": amount_yen}
     return {"state": "not_eligible", "viewCount": view_count, "threshold": threshold}
 
 
@@ -476,6 +486,7 @@ def serialize_redemption_request(r):
     return {
         "id": r["id"],
         "points": r["points"],
+        "pointsYen": points_to_yen(r["points"]),
         "status": r["status"],
         "requestedAt": r.get("requested_at"),
         "fulfilledAt": r.get("fulfilled_at"),
@@ -2110,6 +2121,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond_json(200, {
             "ok": True,
             "pointsBalance": creator.get("points_balance", 0),
+            "pointsBalanceYen": points_to_yen(creator.get("points_balance", 0)),
             "redemptionRequests": [
                 serialize_redemption_request(r) for r in creator.get("redemption_requests", [])
             ],
@@ -2162,7 +2174,7 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
             new_balance = creator["points_balance"]
 
-        self.respond_json(200, {"ok": True, "pointsBalance": new_balance})
+        self.respond_json(200, {"ok": True, "pointsBalance": new_balance, "pointsBalanceYen": points_to_yen(new_balance)})
 
     # ---------- クリエイター(女の子)アカウント: 管理者側の操作 ----------
     def handle_list_creators(self):
@@ -2174,6 +2186,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status": c["status"],
                 "loginCode": c.get("login_code"),
                 "pointsBalance": c.get("points_balance", 0),
+                "pointsBalanceYen": points_to_yen(c.get("points_balance", 0)),
                 "redemptionRequests": [serialize_redemption_request(r) for r in c.get("redemption_requests", [])],
                 "invitedAt": c.get("invited_at"),
                 "activatedAt": c.get("activated_at"),
@@ -2285,7 +2298,7 @@ class Handler(BaseHTTPRequestHandler):
             video["points_awarded_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             save_videos(videos)
 
-        self.respond_json(200, {"ok": True, "amount": amount})
+        self.respond_json(200, {"ok": True, "amount": amount, "amountYen": points_to_yen(amount)})
 
     def handle_creators_adjust_points(self):
         content_length = int(self.headers.get("Content-Length", 0))
@@ -2323,7 +2336,7 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
             new_balance = creator["points_balance"]
 
-        self.respond_json(200, {"ok": True, "pointsBalance": new_balance})
+        self.respond_json(200, {"ok": True, "pointsBalance": new_balance, "pointsBalanceYen": points_to_yen(new_balance)})
 
     def handle_creators_fulfill_redemption(self):
         content_length = int(self.headers.get("Content-Length", 0))

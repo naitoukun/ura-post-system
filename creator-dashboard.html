@@ -55,7 +55,8 @@
 
   <div class="card rounded-2xl p-4 flex flex-col gap-1">
     <span class="text-xs text-slate-400">現在のポイント残高</span>
-    <span id="pointsBalanceText" class="points-count text-3xl font-extrabold text-teal-600">-</span>
+    <span id="pointsBalanceText" class="points-count text-4xl font-extrabold text-teal-600">-</span>
+    <span id="pointsYenText" class="text-sm font-medium text-slate-500">-</span>
   </div>
 
   <form id="redemptionForm" class="card rounded-2xl p-4 flex flex-col gap-3">
@@ -148,6 +149,7 @@
   const contentListBox = document.getElementById('contentListBox');
   const logoutBtn   = document.getElementById('logoutBtn');
   const pointsBalanceText = document.getElementById('pointsBalanceText');
+  const pointsYenText = document.getElementById('pointsYenText');
   const dailyUploadStatusText = document.getElementById('dailyUploadStatusText');
 
   const redemptionForm = document.getElementById('redemptionForm');
@@ -168,6 +170,7 @@
     .catch(() => {});
 
   let currentBalance = 0;
+  let currentBalanceYen = 0;
   let currentRedemptions = [];
 
   function redirectIfUnauthenticated(status) {
@@ -272,8 +275,13 @@
     xhr.send(formData);
   });
 
+  function formatNumber(n) {
+    return (n || 0).toLocaleString('ja-JP');
+  }
+
   function refreshPointsBox() {
-    pointsBalanceText.textContent = currentBalance + ' pt';
+    pointsBalanceText.textContent = formatNumber(currentBalance) + ' pt';
+    pointsYenText.textContent = formatNumber(currentBalanceYen) + '円分';
 
     redemptionHistoryBox.innerHTML = '';
     if (!currentRedemptions.length) return;
@@ -292,7 +300,7 @@
 
         const label = document.createElement('span');
         label.className = 'text-slate-600';
-        label.textContent = req.points + 'pt（' + req.requestedAt + '）';
+        label.textContent = formatNumber(req.points) + 'pt（' + formatNumber(req.pointsYen) + '円分・' + req.requestedAt + '）';
         row.appendChild(label);
 
         const status = document.createElement('span');
@@ -355,13 +363,13 @@
   function pointsStatusLabel(ps) {
     if (!ps) return null;
     if (ps.state === 'collecting') {
-      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt予定）', tone: 'bg-slate-100 text-slate-500' };
+      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', tone: 'bg-slate-100 text-slate-500' };
     }
     if (ps.state === 'eligible_pending_approval') {
-      return { text: '承認待ち（+' + ps.amount + 'pt予定）', tone: 'bg-amber-50 text-amber-700' };
+      return { text: '承認待ち（+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', tone: 'bg-amber-50 text-amber-700' };
     }
     if (ps.state === 'awarded') {
-      return { text: '付与済み（+' + ps.amount + 'pt）', tone: 'bg-teal-50 text-teal-700' };
+      return { text: '付与済み（+' + ps.amount + 'pt（' + ps.amountYen + '円分））', tone: 'bg-teal-50 text-teal-700' };
     }
     if (ps.state === 'not_eligible') {
       return { text: '対象外（閲覧数未達）', tone: 'bg-slate-100 text-slate-400' };
@@ -494,6 +502,7 @@
         if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
           currentBalance = data.pointsBalance || 0;
+          currentBalanceYen = data.pointsBalanceYen || 0;
           currentRedemptions = data.redemptionRequests || [];
           refreshPointsBox();
 

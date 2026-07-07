@@ -343,6 +343,13 @@ def save_config(config):
         json.dump(config, f, ensure_ascii=False)
 
 
+# videos.json への書き込みも、複数のクリエイターが同時にアップロード/削除/設定変更した際に
+# 片方の変更が丸ごと消える(read-modify-writeのロスト・アップデート)のを防ぐため、
+# creators.json と同様にロックで保護する。両方のロックが必要な処理(ポイント承認等)では
+# 必ず CREATORS_LOCK を先に、VIDEOS_LOCK を後に取得すること(デッドロック防止のため順序を統一)。
+VIDEOS_LOCK = threading.Lock()
+
+
 def load_videos():
     if not os.path.exists(VIDEOS_META_PATH):
         return []
@@ -1020,35 +1027,36 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def handle_list_videos(self):
-        videos = sorted(load_videos(), key=lambda v: v["uploaded_at"], reverse=True)
         config = load_config()
         creators = load_creators()
-        body = [
-            {
-                "id": v["id"],
-                "originalFilename": v["original_filename"],
-                "uploadedAt": v["uploaded_at"],
-                "ads": [serialize_ad(ad) for ad in v["ads"]] if v.get("ads") else None,
-                "timeLimit": get_time_limit_status(v),
-                "creatorName": v.get("creator_name"),
-                "creatorUrl": v.get("creator_url"),
-                "viewCount": v.get("view_count", 0),
-                "hasCustomThumbnail": bool(v.get("og_image_filename")),
-                "statsToken": get_stats_token(v, videos),
-                "contentType": v.get("content_type", "video"),
-                "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
-                "ownerDisplayName": (
-                    (find_creator(creators, v["owner_creator_id"]) or {}).get("display_name")
-                    if v.get("owner_creator_id") else None
-                ),
-                "pointsStatus": get_points_status(v, find_creator(creators, v.get("owner_creator_id")), config),
-                "ctaButtonText": v.get("cta_button_text"),
-                "ctaLinkUrl": v.get("cta_link_url"),
-                "effectiveCtaButtonText": get_effective_cta(v, config, find_creator(creators, v.get("owner_creator_id")))["premiumButtonText"],
-                "effectiveCtaLink": get_effective_cta(v, config, find_creator(creators, v.get("owner_creator_id")))["premiumLink"],
-            }
-            for v in videos
-        ]
+        with VIDEOS_LOCK:
+            videos = sorted(load_videos(), key=lambda v: v["uploaded_at"], reverse=True)
+            body = [
+                {
+                    "id": v["id"],
+                    "originalFilename": v["original_filename"],
+                    "uploadedAt": v["uploaded_at"],
+                    "ads": [serialize_ad(ad) for ad in v["ads"]] if v.get("ads") else None,
+                    "timeLimit": get_time_limit_status(v),
+                    "creatorName": v.get("creator_name"),
+                    "creatorUrl": v.get("creator_url"),
+                    "viewCount": v.get("view_count", 0),
+                    "hasCustomThumbnail": bool(v.get("og_image_filename")),
+                    "statsToken": get_stats_token(v, videos),
+                    "contentType": v.get("content_type", "video"),
+                    "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
+                    "ownerDisplayName": (
+                        (find_creator(creators, v["owner_creator_id"]) or {}).get("display_name")
+                        if v.get("owner_creator_id") else None
+                    ),
+                    "pointsStatus": get_points_status(v, find_creator(creators, v.get("owner_creator_id")), config),
+                    "ctaButtonText": v.get("cta_button_text"),
+                    "ctaLinkUrl": v.get("cta_link_url"),
+                    "effectiveCtaButtonText": get_effective_cta(v, config, find_creator(creators, v.get("owner_creator_id")))["premiumButtonText"],
+                    "effectiveCtaLink": get_effective_cta(v, config, find_creator(creators, v.get("owner_creator_id")))["premiumLink"],
+                }
+                for v in videos
+            ]
         self.respond_json(200, body)
 
     def handle_resolve_video(self, query):
@@ -1060,25 +1068,26 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(200, {"linkRequired": True})
             return
 
-        videos_list = load_videos()
-        video = next((v for v in videos_list if v["id"] == requested_id), None)
-        if not video or not video_file_path(video):
-            # 削除済み・存在しないIDへのアクセスは「期限切れ」と同じ画面に統一する。
-            # (手動削除なのか自然に24時間経過したのかを外部から区別させないため)
-            self.respond_json(200, {"expired": True})
-            return
+        with VIDEOS_LOCK:
+            videos_list = load_videos()
+            video = next((v for v in videos_list if v["id"] == requested_id), None)
+            if not video or not video_file_path(video):
+                # 削除済み・存在しないIDへのアクセスは「期限切れ」と同じ画面に統一する。
+                # (手動削除なのか自然に24時間経過したのかを外部から区別させないため)
+                self.respond_json(200, {"expired": True})
+                return
 
-        # 「URLが初めて開かれた瞬間」をこの時点で記録する
-        mark_first_access(video, videos_list)
+            # 「URLが初めて開かれた瞬間」をこの時点で記録する
+            mark_first_access(video, videos_list)
 
-        if get_time_limit_status(video)["expired"]:
-            self.respond_json(200, {"expired": True})
-            return
+            if get_time_limit_status(video)["expired"]:
+                self.respond_json(200, {"expired": True})
+                return
 
-        # モザイク越しのロック画面が表示された回数を視聴回数としてカウントする
-        # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)
-        video["view_count"] = video.get("view_count", 0) + 1
-        save_videos(videos_list)
+            # モザイク越しのロック画面が表示された回数を視聴回数としてカウントする
+            # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)
+            video["view_count"] = video.get("view_count", 0) + 1
+            save_videos(videos_list)
 
         config = load_config()
         effective_ads = video.get("ads") or config["ads"]
@@ -1100,19 +1109,22 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def handle_serve_video(self, video_id):
-        videos_list = load_videos()
-        video = next((v for v in videos_list if v["id"] == video_id), None)
-        if video and video.get("content_type") == "image":
-            # 画像ギャラリーは /image/<id>/<index> の方を使う
-            self.send_error(404, "Video not found")
-            return
-        path = video_file_path(video) if video else None
-        if not path:
-            self.send_error(404, "Video not found")
-            return
+        with VIDEOS_LOCK:
+            videos_list = load_videos()
+            video = next((v for v in videos_list if v["id"] == video_id), None)
+            if video and video.get("content_type") == "image":
+                # 画像ギャラリーは /image/<id>/<index> の方を使う
+                self.send_error(404, "Video not found")
+                return
+            path = video_file_path(video) if video else None
+            if not path:
+                self.send_error(404, "Video not found")
+                return
 
-        mark_first_access(video, videos_list)
-        if get_time_limit_status(video)["expired"]:
+            mark_first_access(video, videos_list)
+            expired = get_time_limit_status(video)["expired"]
+
+        if expired:
             self.send_error(410, "This video link has expired")
             return
 
@@ -1180,24 +1192,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
             return
 
-        videos_list = load_videos()
-        video = next((v for v in videos_list if v["id"] == video_id), None)
-        if not video or video.get("content_type") != "image":
-            self.send_error(404, "Not Found")
-            return
+        with VIDEOS_LOCK:
+            videos_list = load_videos()
+            video = next((v for v in videos_list if v["id"] == video_id), None)
+            if not video or video.get("content_type") != "image":
+                self.send_error(404, "Not Found")
+                return
 
-        image_filenames = video.get("image_filenames") or []
-        if index < 0 or index >= len(image_filenames):
-            self.send_error(404, "Not Found")
-            return
+            image_filenames = video.get("image_filenames") or []
+            if index < 0 or index >= len(image_filenames):
+                self.send_error(404, "Not Found")
+                return
 
-        path = os.path.join(UPLOAD_DIR, image_filenames[index])
-        if not os.path.exists(path):
-            self.send_error(404, "Not Found")
-            return
+            path = os.path.join(UPLOAD_DIR, image_filenames[index])
+            if not os.path.exists(path):
+                self.send_error(404, "Not Found")
+                return
 
-        mark_first_access(video, videos_list)
-        if get_time_limit_status(video)["expired"]:
+            mark_first_access(video, videos_list)
+            expired = get_time_limit_status(video)["expired"]
+
+        if expired:
             self.send_error(410, "This link has expired")
             return
 
@@ -1568,27 +1583,28 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        videos = load_videos()
-        video = next((v for v in videos if v["id"] == data.get("id")), None)
-        if not video:
-            self.respond_json(404, {"ok": False, "error": "not_found"})
-            return
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
 
-        ads_input = data.get("ads")
-        if ads_input is None:
-            # ads未指定(null)は「個別設定を解除して既定に戻す」の意味
-            video.pop("ads", None)
+            ads_input = data.get("ads")
+            if ads_input is None:
+                # ads未指定(null)は「個別設定を解除して既定に戻す」の意味
+                video.pop("ads", None)
+                save_videos(videos)
+                self.respond_json(200, {"ok": True, "ads": None})
+                return
+
+            new_ads, error = validate_ads_payload(ads_input)
+            if error:
+                self.respond_json(400, {"ok": False, "error": error})
+                return
+
+            video["ads"] = new_ads
             save_videos(videos)
-            self.respond_json(200, {"ok": True, "ads": None})
-            return
-
-        new_ads, error = validate_ads_payload(ads_input)
-        if error:
-            self.respond_json(400, {"ok": False, "error": error})
-            return
-
-        video["ads"] = new_ads
-        save_videos(videos)
 
         self.respond_json(200, {"ok": True, "ads": [serialize_ad(ad) for ad in new_ads]})
 
@@ -1609,19 +1625,21 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_request"})
             return
 
-        videos = load_videos()
-        video = next((v for v in videos if v["id"] == data.get("id")), None)
-        if not video:
-            self.respond_json(404, {"ok": False, "error": "not_found"})
-            return
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
 
-        video["time_limit_enabled"] = enabled
-        if not enabled:
-            # 無効化したら計測もリセットする（再度有効化した時は次回アクセスから計測し直す）
-            video.pop("first_accessed_at", None)
-        save_videos(videos)
+            video["time_limit_enabled"] = enabled
+            if not enabled:
+                # 無効化したら計測もリセットする（再度有効化した時は次回アクセスから計測し直す）
+                video.pop("first_accessed_at", None)
+            save_videos(videos)
+            time_limit_status = get_time_limit_status(video)
 
-        self.respond_json(200, {"ok": True, "timeLimit": get_time_limit_status(video)})
+        self.respond_json(200, {"ok": True, "timeLimit": time_limit_status})
 
     def handle_set_video_cta(self):
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1635,31 +1653,32 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        videos = load_videos()
-        video = next((v for v in videos if v["id"] == data.get("id")), None)
-        if not video:
-            self.respond_json(404, {"ok": False, "error": "not_found"})
-            return
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
 
-        name_input = data.get("creatorName")
-        url_input = data.get("creatorUrl")
+            name_input = data.get("creatorName")
+            url_input = data.get("creatorUrl")
 
-        if name_input is None and url_input is None:
-            # 両方null(未指定)は「個別設定を解除して既定に戻す」の意味
-            video.pop("creator_name", None)
-            video.pop("creator_url", None)
+            if name_input is None and url_input is None:
+                # 両方null(未指定)は「個別設定を解除して既定に戻す」の意味
+                video.pop("creator_name", None)
+                video.pop("creator_url", None)
+                save_videos(videos)
+                self.respond_json(200, {"ok": True, "creatorName": None, "creatorUrl": None})
+                return
+
+            name, url, error = validate_creator_cta(name_input, url_input)
+            if error:
+                self.respond_json(400, {"ok": False, "error": error})
+                return
+
+            video["creator_name"] = name
+            video["creator_url"] = url
             save_videos(videos)
-            self.respond_json(200, {"ok": True, "creatorName": None, "creatorUrl": None})
-            return
-
-        name, url, error = validate_creator_cta(name_input, url_input)
-        if error:
-            self.respond_json(400, {"ok": False, "error": error})
-            return
-
-        video["creator_name"] = name
-        video["creator_url"] = url
-        save_videos(videos)
 
         self.respond_json(200, {"ok": True, "creatorName": name, "creatorUrl": url})
 
@@ -1675,32 +1694,33 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        videos = load_videos()
-        video = next((v for v in videos if v["id"] == data.get("id")), None)
-        if not video:
-            self.respond_json(404, {"ok": False, "error": "not_found"})
-            return
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
 
-        cta_text, error = validate_cta_button_text(data.get("ctaButtonText"))
-        if error:
-            self.respond_json(400, {"ok": False, "error": error})
-            return
+            cta_text, error = validate_cta_button_text(data.get("ctaButtonText"))
+            if error:
+                self.respond_json(400, {"ok": False, "error": error})
+                return
 
-        cta_link, error = validate_cta_link_url(data.get("ctaLinkUrl"))
-        if error:
-            self.respond_json(400, {"ok": False, "error": error})
-            return
+            cta_link, error = validate_cta_link_url(data.get("ctaLinkUrl"))
+            if error:
+                self.respond_json(400, {"ok": False, "error": error})
+                return
 
-        if cta_text:
-            video["cta_button_text"] = cta_text
-        else:
-            video.pop("cta_button_text", None)
+            if cta_text:
+                video["cta_button_text"] = cta_text
+            else:
+                video.pop("cta_button_text", None)
 
-        if cta_link:
-            video["cta_link_url"] = cta_link
-        else:
-            video.pop("cta_link_url", None)
-        save_videos(videos)
+            if cta_link:
+                video["cta_link_url"] = cta_link
+            else:
+                video.pop("cta_link_url", None)
+            save_videos(videos)
 
         self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
@@ -1721,35 +1741,36 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length)
         fields, files = parse_multipart(body, boundary)
 
-        videos = load_videos()
-        video = next((v for v in videos if v["id"] == fields.get("id")), None)
-        if not video:
-            self.respond_json(404, {"ok": False, "error": "not_found"})
-            return
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == fields.get("id")), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
 
-        image_file = first_file(files, "thumbnail")
-        if not image_file:
-            self.respond_json(400, {"ok": False, "error": "missing_image_field"})
-            return
+            image_file = first_file(files, "thumbnail")
+            if not image_file:
+                self.respond_json(400, {"ok": False, "error": "missing_image_field"})
+                return
 
-        ext = os.path.splitext(image_file["filename"] or "")[1].lower()
-        if ext not in OG_IMAGE_ALLOWED_EXTENSIONS:
-            self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
-            return
+            ext = os.path.splitext(image_file["filename"] or "")[1].lower()
+            if ext not in OG_IMAGE_ALLOWED_EXTENSIONS:
+                self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+                return
 
-        # 拡張子が変わった場合に前のサムネイルが残らないよう、既存分は一旦削除する
-        old_filename = video.get("og_image_filename")
-        if old_filename:
-            old_path = os.path.join(UPLOAD_DIR, old_filename)
-            if os.path.exists(old_path):
-                os.remove(old_path)
+            # 拡張子が変わった場合に前のサムネイルが残らないよう、既存分は一旦削除する
+            old_filename = video.get("og_image_filename")
+            if old_filename:
+                old_path = os.path.join(UPLOAD_DIR, old_filename)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
 
-        new_filename = "thumb_" + video["id"] + ext
-        with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-            f.write(image_file["content"])
+            new_filename = "thumb_" + video["id"] + ext
+            with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
+                f.write(image_file["content"])
 
-        video["og_image_filename"] = new_filename
-        save_videos(videos)
+            video["og_image_filename"] = new_filename
+            save_videos(videos)
 
         self.respond_json(200, {"ok": True})
 
@@ -1765,19 +1786,20 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        videos = load_videos()
-        video = next((v for v in videos if v["id"] == data.get("id")), None)
-        if not video:
-            self.respond_json(404, {"ok": False, "error": "not_found"})
-            return
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
 
-        old_filename = video.get("og_image_filename")
-        if old_filename:
-            old_path = os.path.join(UPLOAD_DIR, old_filename)
-            if os.path.exists(old_path):
-                os.remove(old_path)
-        video.pop("og_image_filename", None)
-        save_videos(videos)
+            old_filename = video.get("og_image_filename")
+            if old_filename:
+                old_path = os.path.join(UPLOAD_DIR, old_filename)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            video.pop("og_image_filename", None)
+            save_videos(videos)
 
         self.respond_json(200, {"ok": True})
 
@@ -1894,19 +1916,20 @@ class Handler(BaseHTTPRequestHandler):
 
             original_filename = image_files[0]["filename"] or "upload"
 
-            videos = load_videos()
-            videos.append({
-                "id": content_id,
-                "content_type": "image",
-                "image_filenames": image_filenames,
-                "original_filename": original_filename,
-                "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "time_limit_enabled": time_limit_enabled,
-                "stats_token": secrets.token_urlsafe(9),
-                **creator_fields,
-                **owner_fields,
-            })
-            save_videos(videos)
+            with VIDEOS_LOCK:
+                videos = load_videos()
+                videos.append({
+                    "id": content_id,
+                    "content_type": "image",
+                    "image_filenames": image_filenames,
+                    "original_filename": original_filename,
+                    "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "time_limit_enabled": time_limit_enabled,
+                    "stats_token": secrets.token_urlsafe(9),
+                    **creator_fields,
+                    **owner_fields,
+                })
+                save_videos(videos)
 
             self.respond_json(200, {
                 "ok": True,
@@ -1948,19 +1971,20 @@ class Handler(BaseHTTPRequestHandler):
         with open(os.path.join(UPLOAD_DIR, stored_filename), "wb") as f:
             f.write(video_file["content"])
 
-        videos = load_videos()
-        videos.append({
-            "id": video_id,
-            "content_type": "video",
-            "stored_filename": stored_filename,
-            "original_filename": original_filename,
-            "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "time_limit_enabled": time_limit_enabled,
-            "stats_token": secrets.token_urlsafe(9),
-            **creator_fields,
-            **owner_fields,
-        })
-        save_videos(videos)
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            videos.append({
+                "id": video_id,
+                "content_type": "video",
+                "stored_filename": stored_filename,
+                "original_filename": original_filename,
+                "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "time_limit_enabled": time_limit_enabled,
+                "stats_token": secrets.token_urlsafe(9),
+                **creator_fields,
+                **owner_fields,
+            })
+            save_videos(videos)
 
         self.respond_json(200, {
             "ok": True,
@@ -2042,18 +2066,19 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": error})
             return
 
-        videos = load_videos()
-        target = next((v for v in videos if v["id"] == video_id), None)
-        if cta_text:
-            target["cta_button_text"] = cta_text
-        else:
-            target.pop("cta_button_text", None)
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            target = next((v for v in videos if v["id"] == video_id), None)
+            if cta_text:
+                target["cta_button_text"] = cta_text
+            else:
+                target.pop("cta_button_text", None)
 
-        if cta_link:
-            target["cta_link_url"] = cta_link
-        else:
-            target.pop("cta_link_url", None)
-        save_videos(videos)
+            if cta_link:
+                target["cta_link_url"] = cta_link
+            else:
+                target.pop("cta_link_url", None)
+            save_videos(videos)
 
         self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
@@ -2075,8 +2100,9 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.exists(thumbnail_path):
                 os.remove(thumbnail_path)
 
-        videos = [v for v in load_videos() if v["id"] != video_id]
-        save_videos(videos)
+        with VIDEOS_LOCK:
+            videos = [v for v in load_videos() if v["id"] != video_id]
+            save_videos(videos)
 
     def handle_set_og_image(self):
         content_type_header = self.headers.get("Content-Type", "")
@@ -2418,7 +2444,8 @@ class Handler(BaseHTTPRequestHandler):
 
         content_id = data.get("contentId")
 
-        with CREATORS_LOCK:
+        # 両方のロックが必要な処理なので、デッドロック防止のため必ずCREATORS_LOCKを先に取る
+        with CREATORS_LOCK, VIDEOS_LOCK:
             config = load_config()
             videos = load_videos()
             video = next((v for v in videos if v["id"] == content_id), None)

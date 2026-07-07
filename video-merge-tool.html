@@ -210,7 +210,7 @@
 
     const cleanup = () => URL.revokeObjectURL(objectUrl);
 
-    video.addEventListener('loadeddata', () => {
+    function draw() {
       const canvas = document.createElement('canvas');
       canvas.width = 88;
       canvas.height = 88;
@@ -223,6 +223,17 @@
       thumbCache.set(file, dataUrl);
       imgEl.src = dataUrl;
       cleanup();
+    }
+
+    video.addEventListener('loadeddata', () => {
+      // 動画冒頭が暗転/真っ暗なことが多いため、少し進めた位置のフレームを使う
+      const seekTo = Math.min(0.5, video.duration / 2 || 0);
+      if (seekTo > 0) {
+        video.addEventListener('seeked', draw, { once: true });
+        video.currentTime = seekTo;
+      } else {
+        draw();
+      }
     }, { once: true });
 
     video.addEventListener('error', cleanup, { once: true });

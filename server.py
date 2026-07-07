@@ -6,6 +6,7 @@
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示)
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
+- GET  /video-merge-tool  クリエイター向け動画結合ツール（ブラウザ内完結、ログイン不要）
 - GET  /terms           利用規約
 - GET  /disclaimer      免責事項
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
@@ -443,6 +444,19 @@ class Handler(BaseHTTPRequestHandler):
             # サーバーの実際のTOTP_SECRETはここでは一切扱わない。
             # 入力された値をブラウザ内だけでQRコード化する単なるツール。
             self.serve_file(os.path.join(BASE_DIR, "admin-totp-setup.html"), "text/html; charset=utf-8")
+        elif path == "/video-merge-tool":
+            # クリエイターに渡す用の動画結合ツール。処理はブラウザ内(ffmpeg.wasm)で完結し、
+            # 動画はサーバーに一切送信されないため、ログイン不要で誰でも使える。
+            # ffmpeg.wasmがSharedArrayBufferを使うため、このページだけcrossOriginIsolated
+            # (COOP/COEP)を有効にする。
+            self.serve_file(
+                os.path.join(BASE_DIR, "video-merge-tool.html"),
+                "text/html; charset=utf-8",
+                extra_headers={
+                    "Cross-Origin-Opener-Policy": "same-origin",
+                    "Cross-Origin-Embedder-Policy": "require-corp",
+                },
+            )
         elif path == "/terms":
             self.serve_file(os.path.join(BASE_DIR, "terms.html"), "text/html; charset=utf-8")
         elif path == "/disclaimer":
@@ -611,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
 
-    def serve_file(self, path, content_type):
+    def serve_file(self, path, content_type, extra_headers=None):
         if not os.path.exists(path):
             self.send_error(404, "Not Found")
             return
@@ -620,6 +634,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 

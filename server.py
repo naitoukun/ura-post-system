@@ -16,9 +16,11 @@
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
-- GET  /resolve-video   指定した(または最新の)動画のメタ情報 (JSON)
-- GET  /video/<id>      指定した動画の配信（Range対応 = シーク可能）
-- POST /api/upload      動画アップロード（multipart/form-data。動画ごとに新しいIDを発行）※要ログイン
+- GET  /resolve-video   指定した(または最新の)コンテンツのメタ情報 (JSON。動画/画像共通)
+- GET  /video/<id>      指定した動画の配信（Range対応 = シーク可能。画像ギャラリーには404）
+- GET  /image/<id>/<index>  画像ギャラリーのうち指定した1枚の配信
+- POST /api/upload      動画または画像ギャラリーのアップロード（multipart/form-data。
+                        contentType=video/image。新規IDを発行）※要ログイン
 - POST /api/videos/delete  動画の削除（JSON）※要ログイン
 - POST /api/videos/set-ads  動画ごとの広告A/B個別設定の更新・解除（JSON）※要ログイン
 - POST /api/videos/set-time-limit  動画ごとの24時間限定設定の有効/無効切り替え（JSON）※要ログイン
@@ -83,6 +85,11 @@ SESSIONS = {}
 
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
 ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
+
+# 画像モード(複数枚のギャラリー)用。1枚あたりのサイズ・枚数上限は動画よりだいぶ小さいので別枠にする。
+IMAGE_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 1枚あたり20MB
+MAX_IMAGES_PER_GALLERY = 30
 
 # SNSシェア時のOGP/Twitterカード画像。管理画面から差し替えが無い場合は
 # BASE_DIR直下の同梱デフォルト画像を使う。差し替え分は永続ディスク(UPLOAD_DIR)に保存する。
@@ -166,6 +173,13 @@ def find_video(video_id):
 
 
 def video_file_path(video):
+    """コンテンツの実体ファイルの存在確認用。画像ギャラリーの場合は1枚目で代表させる。"""
+    if video.get("content_type") == "image":
+        filenames = video.get("image_filenames") or []
+        if not filenames:
+            return None
+        path = os.path.join(UPLOAD_DIR, filenames[0])
+        return path if os.path.exists(path) else None
     path = os.path.join(UPLOAD_DIR, video["stored_filename"])
     return path if os.path.exists(path) else None
 
@@ -332,7 +346,11 @@ def validate_creator_cta(name, url):
 
 
 def parse_multipart(body: bytes, boundary: bytes):
-    """multipart/form-data を最小限だけ解釈するパーサ。"""
+    """multipart/form-data を最小限だけ解釈するパーサ。
+
+    同じフィールド名で複数ファイルが送られてくる場合(画像ギャラリーの複数選択等)に
+    対応するため、files[field_name] は常にリスト(1件でも[dict])で返す。
+    """
     delimiter = b"--" + boundary
     raw_parts = body.split(delimiter)
     fields = {}
@@ -358,14 +376,20 @@ def parse_multipart(body: bytes, boundary: bytes):
 
         filename_match = re.search(r'filename="([^"]*)"', header_block)
         if filename_match:
-            files[field_name] = {
+            files.setdefault(field_name, []).append({
                 "filename": filename_match.group(1),
                 "content": content,
-            }
+            })
         else:
             fields[field_name] = content.decode("utf-8", errors="replace")
 
     return fields, files
+
+
+def first_file(files, field_name):
+    """files[field_name](リスト)の先頭1件だけ取り出す。無ければNone。"""
+    entries = files.get(field_name)
+    return entries[0] if entries else None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -477,6 +501,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_resolve_video(parse_qs(split.query))
         elif path.startswith("/video/"):
             self.handle_serve_video(path[len("/video/"):])
+        elif path.startswith("/image/"):
+            self.handle_serve_image(path[len("/image/"):])
         elif path == "/site-config":
             self.handle_site_config()
         else:
@@ -511,6 +537,8 @@ class Handler(BaseHTTPRequestHandler):
                 "viewCount": v.get("view_count", 0),
                 "hasCustomThumbnail": bool(v.get("og_image_filename")),
                 "statsToken": get_stats_token(v, videos),
+                "contentType": v.get("content_type", "video"),
+                "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
             }
             for v in videos
         ]
@@ -549,9 +577,12 @@ class Handler(BaseHTTPRequestHandler):
         effective_ads = video.get("ads") or config["ads"]
         cta = get_effective_cta(video, config)
 
+        content_type = video.get("content_type", "video")
         self.respond_json(200, {
             "expired": False,
             "id": video["id"],
+            "contentType": content_type,
+            "imageCount": len(video.get("image_filenames") or []) if content_type == "image" else None,
             "originalFilename": video["original_filename"],
             "uploadedAt": video["uploaded_at"],
             "ads": [serialize_ad(ad) for ad in effective_ads],
@@ -563,6 +594,10 @@ class Handler(BaseHTTPRequestHandler):
     def handle_serve_video(self, video_id):
         videos_list = load_videos()
         video = next((v for v in videos_list if v["id"] == video_id), None)
+        if video and video.get("content_type") == "image":
+            # 画像ギャラリーは /image/<id>/<index> の方を使う
+            self.send_error(404, "Video not found")
+            return
         path = video_file_path(video) if video else None
         if not path:
             self.send_error(404, "Video not found")
@@ -624,6 +659,42 @@ class Handler(BaseHTTPRequestHandler):
                     if not chunk:
                         break
                     self.wfile.write(chunk)
+
+    def handle_serve_image(self, path_suffix):
+        parts = path_suffix.split("/", 1)
+        if len(parts) != 2:
+            self.send_error(404, "Not Found")
+            return
+        video_id, index_str = parts
+        try:
+            index = int(index_str)
+        except ValueError:
+            self.send_error(404, "Not Found")
+            return
+
+        videos_list = load_videos()
+        video = next((v for v in videos_list if v["id"] == video_id), None)
+        if not video or video.get("content_type") != "image":
+            self.send_error(404, "Not Found")
+            return
+
+        image_filenames = video.get("image_filenames") or []
+        if index < 0 or index >= len(image_filenames):
+            self.send_error(404, "Not Found")
+            return
+
+        path = os.path.join(UPLOAD_DIR, image_filenames[index])
+        if not os.path.exists(path):
+            self.send_error(404, "Not Found")
+            return
+
+        mark_first_access(video, videos_list)
+        if get_time_limit_status(video)["expired"]:
+            self.send_error(410, "This link has expired")
+            return
+
+        content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        self.serve_file(path, content_type, extra_headers={"Cache-Control": "no-store"})
 
     def serve_file(self, path, content_type, extra_headers=None):
         if not os.path.exists(path):
@@ -1005,7 +1076,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(404, {"ok": False, "error": "not_found"})
             return
 
-        image_file = files.get("thumbnail")
+        image_file = first_file(files, "thumbnail")
         if not image_file:
             self.respond_json(400, {"ok": False, "error": "missing_image_field"})
             return
@@ -1076,17 +1147,6 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length)
         fields, files = parse_multipart(body, boundary)
 
-        video_file = files.get("video")
-        if not video_file:
-            self.respond_json(400, {"ok": False, "error": "missing_video_field"})
-            return
-
-        original_filename = video_file["filename"] or "upload"
-        ext = os.path.splitext(original_filename)[1].lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
-            return
-
         # 出演者名+Fantia URLは任意入力。どちらか一方でも入力されていれば両方揃っているか検証する
         creator_name_input = fields.get("creatorName", "").strip()
         creator_url_input = fields.get("creatorUrl", "").strip()
@@ -1098,9 +1158,70 @@ class Handler(BaseHTTPRequestHandler):
                 return
             creator_fields = {"creator_name": name, "creator_url": url}
 
+        time_limit_enabled = fields.get("timeLimitEnabled") in ("1", "true", "on")
+        content_type = fields.get("contentType") if fields.get("contentType") == "image" else "video"
+
+        if content_type == "image":
+            image_files = files.get("images") or []
+            if not image_files:
+                self.respond_json(400, {"ok": False, "error": "missing_image_field"})
+                return
+            if len(image_files) > MAX_IMAGES_PER_GALLERY:
+                self.respond_json(400, {"ok": False, "error": "too_many_images"})
+                return
+            for image_file in image_files:
+                ext = os.path.splitext(image_file["filename"] or "")[1].lower()
+                if ext not in IMAGE_ALLOWED_EXTENSIONS:
+                    self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+                    return
+                if len(image_file["content"]) > MAX_IMAGE_BYTES:
+                    self.respond_json(413, {"ok": False, "error": "file_too_large"})
+                    return
+
+            content_id = secrets.token_urlsafe(9)
+            image_filenames = []
+            for index, image_file in enumerate(image_files):
+                ext = os.path.splitext(image_file["filename"] or "")[1].lower()
+                stored_name = f"{content_id}_{index}{ext}"
+                with open(os.path.join(UPLOAD_DIR, stored_name), "wb") as f:
+                    f.write(image_file["content"])
+                image_filenames.append(stored_name)
+
+            original_filename = image_files[0]["filename"] or "upload"
+
+            videos = load_videos()
+            videos.append({
+                "id": content_id,
+                "content_type": "image",
+                "image_filenames": image_filenames,
+                "original_filename": original_filename,
+                "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "time_limit_enabled": time_limit_enabled,
+                "stats_token": secrets.token_urlsafe(9),
+                **creator_fields,
+            })
+            save_videos(videos)
+
+            self.respond_json(200, {
+                "ok": True,
+                "id": content_id,
+                "originalFilename": original_filename,
+            })
+            return
+
+        video_file = first_file(files, "video")
+        if not video_file:
+            self.respond_json(400, {"ok": False, "error": "missing_video_field"})
+            return
+
+        original_filename = video_file["filename"] or "upload"
+        ext = os.path.splitext(original_filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+            return
+
         video_id = secrets.token_urlsafe(9)
         stored_filename = video_id + ext
-        time_limit_enabled = fields.get("timeLimitEnabled") in ("1", "true", "on")
 
         with open(os.path.join(UPLOAD_DIR, stored_filename), "wb") as f:
             f.write(video_file["content"])
@@ -1108,6 +1229,7 @@ class Handler(BaseHTTPRequestHandler):
         videos = load_videos()
         videos.append({
             "id": video_id,
+            "content_type": "video",
             "stored_filename": stored_filename,
             "original_filename": original_filename,
             "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1141,9 +1263,15 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(404, {"ok": False, "error": "not_found"})
             return
 
-        path = os.path.join(UPLOAD_DIR, video["stored_filename"])
-        if os.path.exists(path):
-            os.remove(path)
+        if video.get("content_type") == "image":
+            for image_filename in video.get("image_filenames") or []:
+                image_path = os.path.join(UPLOAD_DIR, image_filename)
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+        else:
+            path = os.path.join(UPLOAD_DIR, video["stored_filename"])
+            if os.path.exists(path):
+                os.remove(path)
 
         thumbnail_filename = video.get("og_image_filename")
         if thumbnail_filename:
@@ -1173,7 +1301,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length)
         _, files = parse_multipart(body, boundary)
 
-        image_file = files.get("ogImage")
+        image_file = first_file(files, "ogImage")
         if not image_file:
             self.respond_json(400, {"ok": False, "error": "missing_image_field"})
             return

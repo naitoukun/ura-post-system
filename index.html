@@ -168,6 +168,7 @@
       <div class="absolute inset-0 bg-gradient-to-br from-slate-50 to-slate-100"></div>
 
       <video id="teaserVideo" class="hidden" muted loop playsinline preload="auto"></video>
+      <img id="teaserImage" class="hidden" alt="">
       <canvas id="teaserCanvas" class="absolute inset-0 w-full h-full"></canvas>
 
       <div class="relative z-10 w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-slate-900/45 backdrop-blur-sm flex items-center justify-center">
@@ -197,6 +198,8 @@
       autoplay
       playsinline
     ></video>
+
+    <div id="imageGallery" class="hidden-el w-full flex flex-col gap-3"></div>
 
     <a
       id="premiumLink"
@@ -246,8 +249,10 @@
   const unlockedArea= document.getElementById('unlockedArea');
   const overlay     = document.getElementById('overlay');
   const mainVideo   = document.getElementById('mainVideo');
+  const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
   const teaserVideo = document.getElementById('teaserVideo');
+  const teaserImage = document.getElementById('teaserImage');
   const teaserCanvas= document.getElementById('teaserCanvas');
   const selectedAdDebug = document.getElementById('selectedAdDebug');
   const countdownBanner = document.getElementById('countdownBanner');
@@ -305,7 +310,7 @@
       return;
     }
     siteAds = (info.ads && info.ads.length) ? info.ads : FALLBACK_ADS;
-    startTeaserPreview(info.url);
+    startTeaserPreview(info);
 
     premiumLink.href = info.premiumLink || FALLBACK_PREMIUM_LINK;
     premiumLink.textContent = '♥ ' + (info.premiumButtonText || FALLBACK_PREMIUM_BUTTON_TEXT) + ' ♥';
@@ -450,15 +455,34 @@
 
     stopTeaserPreview();
 
-    // 再生中はボタンを目立たせず、動画が最後まで再生され終わった瞬間に
-    // 目立つ色（既存のパルスアニメーション）へ切り替える。視聴後の一番
-    // 「次の行動を探している」タイミングで注目を集めるための演出。
-    premiumLink.classList.add('btn-muted');
-    mainVideo.addEventListener('ended', () => {
-      premiumLink.classList.remove('btn-muted');
-    }, { once: true });
-
     videoInfoPromise.then((info) => {
+      if (info.contentType === 'image') {
+        // 画像は「視聴し終わる」という概念が無いので、ミュート演出はせず
+        // ギャラリーが開いたタイミングでそのまま目立つ色にする。
+        mainVideo.classList.add('hidden-el');
+        imageGallery.classList.remove('hidden-el');
+        imageGallery.innerHTML = '';
+        const count = info.imageCount || 0;
+        for (let i = 0; i < count; i++) {
+          const img = document.createElement('img');
+          img.src = '/image/' + encodeURIComponent(info.id) + '/' + i;
+          img.className = 'card w-full rounded-2xl';
+          img.loading = 'lazy';
+          img.draggable = false;
+          img.oncontextmenu = () => false;
+          imageGallery.appendChild(img);
+        }
+        return;
+      }
+
+      // 再生中はボタンを目立たせず、動画が最後まで再生され終わった瞬間に
+      // 目立つ色（既存のパルスアニメーション）へ切り替える。視聴後の一番
+      // 「次の行動を探している」タイミングで注目を集めるための演出。
+      premiumLink.classList.add('btn-muted');
+      mainVideo.addEventListener('ended', () => {
+        premiumLink.classList.remove('btn-muted');
+      }, { once: true });
+
       mainVideo.src = info.url;
       mainVideo.play().catch(() => {
         // 自動再生がブラウザ側でブロックされた場合は
@@ -483,6 +507,9 @@
         }
         return {
           expired: false,
+          id: status.id,
+          contentType: status.contentType || 'video',
+          imageCount: status.imageCount,
           url: '/video/' + status.id,
           ads: status.ads,
           timeLimit: status.timeLimit,
@@ -502,8 +529,12 @@
   const teaserCtx = teaserCanvas.getContext('2d');
   teaserCtx.imageSmoothingEnabled = false;
 
-  function startTeaserPreview(url) {
-    teaserVideo.src = url;
+  function startTeaserPreview(info) {
+    if (info.contentType === 'image') {
+      startImageMosaicPreview(info);
+      return;
+    }
+    teaserVideo.src = info.url;
     teaserVideo.play().catch(() => {
       // モバイルブラウザ等で自動再生がブロックされた場合は、
       // モザイク自体は静止画（初期フレーム）のままになる
@@ -513,12 +544,29 @@
     mosaicRafId = requestAnimationFrame(drawMosaicFrame);
   }
 
+  function syncCanvasSizeAndRedrawImage() {
+    syncCanvasSize();
+    drawMosaicImageFrame();
+  }
+
+  function startImageMosaicPreview(info) {
+    teaserImage.src = '/image/' + encodeURIComponent(info.id) + '/0';
+    syncCanvasSize();
+    window.addEventListener('resize', syncCanvasSizeAndRedrawImage);
+    if (teaserImage.complete && teaserImage.naturalWidth) {
+      drawMosaicImageFrame();
+    } else {
+      teaserImage.addEventListener('load', drawMosaicImageFrame, { once: true });
+    }
+  }
+
   function stopTeaserPreview() {
     if (mosaicRafId !== null) {
       cancelAnimationFrame(mosaicRafId);
       mosaicRafId = null;
     }
     window.removeEventListener('resize', syncCanvasSize);
+    window.removeEventListener('resize', syncCanvasSizeAndRedrawImage);
     teaserVideo.pause();
   }
 
@@ -541,6 +589,21 @@
       );
     }
     mosaicRafId = requestAnimationFrame(drawMosaicFrame);
+  }
+
+  function drawMosaicImageFrame() {
+    if (teaserImage.naturalWidth) {
+      const aspect = teaserImage.naturalHeight / teaserImage.naturalWidth;
+      smallCanvas.width = MOSAIC_COLUMNS;
+      smallCanvas.height = Math.max(1, Math.round(MOSAIC_COLUMNS * aspect));
+
+      smallCtx.drawImage(teaserImage, 0, 0, smallCanvas.width, smallCanvas.height);
+      teaserCtx.drawImage(
+        smallCanvas,
+        0, 0, smallCanvas.width, smallCanvas.height,
+        0, 0, teaserCanvas.width, teaserCanvas.height
+      );
+    }
   }
 
 })();

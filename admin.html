@@ -41,8 +41,8 @@
 
   <div class="flex items-start justify-between gap-3">
     <div>
-      <h1 class="text-xl font-bold text-slate-800">動画アップロード管理</h1>
-      <p class="text-xs text-slate-400 mt-1">アップロードした動画ごとに個別のURLが発行されます。視聴ページに ?v=動画ID を付けると、その動画がアンロック後に表示されます（省略時は最新の動画）。</p>
+      <h1 class="text-xl font-bold text-slate-800">動画・画像アップロード管理</h1>
+      <p class="text-xs text-slate-400 mt-1">アップロードしたコンテンツ（動画・画像ギャラリー）ごとに個別のURLが発行されます。視聴ページに ?v=IDを付けると、そのコンテンツがアンロック後に表示されます（省略時は最新のもの）。</p>
     </div>
     <button id="logoutBtn" type="button" class="shrink-0 text-xs font-medium text-slate-400 hover:text-slate-600 underline">
       ログアウト
@@ -50,9 +50,23 @@
   </div>
 
   <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <div class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">コンテンツの種類</span>
+      <div class="flex gap-4">
+        <label class="flex items-center gap-1.5 text-sm text-slate-700">
+          <input type="radio" name="contentType" value="video" checked class="w-4 h-4" />
+          動画
+        </label>
+        <label class="flex items-center gap-1.5 text-sm text-slate-700">
+          <input type="radio" name="contentType" value="image" class="w-4 h-4" />
+          画像（複数選択可・ギャラリー）
+        </label>
+      </div>
+    </div>
+
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">動画ファイル（mp4 / webm / mov / m4v）</span>
-      <input type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
+      <span id="fileFieldLabel" class="text-sm font-medium text-slate-700">動画ファイル（mp4 / webm / mov / m4v）</span>
+      <input id="fileInput" type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
         class="text-sm" />
     </label>
 
@@ -223,6 +237,8 @@
 
   const uploadForm  = document.getElementById('uploadForm');
   const submitBtn   = document.getElementById('submitBtn');
+  const fileInputEl = document.getElementById('fileInput');
+  const fileFieldLabel = document.getElementById('fileFieldLabel');
   const progressWrap= document.getElementById('progressWrap');
   const progressBar = document.getElementById('progressBar');
   const progressText= document.getElementById('progressText');
@@ -507,6 +523,9 @@
       badgeRow.appendChild(badge);
     }
 
+    if (video.contentType === 'image') {
+      addBadge('画像ギャラリー（' + (video.imageCount || 0) + '枚）', 'bg-violet-50 text-violet-700');
+    }
     addBadge('視聴回数: ' + (video.viewCount || 0), 'bg-slate-100 text-slate-500');
     if (video.timeLimit && video.timeLimit.enabled) {
       addBadge(
@@ -1028,6 +1047,24 @@
     return wrap;
   }
 
+  // アップロードフォームの「コンテンツの種類」に応じて、ファイル欄を
+  // 動画1本(video)/画像複数枚(images)で切り替える。
+  uploadForm.querySelectorAll('input[name="contentType"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (radio.checked && radio.value === 'image') {
+        fileFieldLabel.textContent = '画像ファイル（jpg / png / webp / gif・複数選択可）';
+        fileInputEl.name = 'images';
+        fileInputEl.accept = 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
+        fileInputEl.multiple = true;
+      } else if (radio.checked && radio.value === 'video') {
+        fileFieldLabel.textContent = '動画ファイル（mp4 / webm / mov / m4v）';
+        fileInputEl.name = 'video';
+        fileInputEl.accept = 'video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v';
+        fileInputEl.multiple = false;
+      }
+    });
+  });
+
   uploadForm.addEventListener('submit', function (e) {
     e.preventDefault();
     resultMsg.textContent = '';
@@ -1062,6 +1099,9 @@
         // resultMsgはform内にあるため、動的に追加するlinkInputをform.reset()で
         // 巻き込んで空にしないよう、DOM構築より先にresetしておく。
         uploadForm.reset();
+        // reset()はcontentTypeのチェック状態は既定(動画)に戻すが、JSで書き換えた
+        // fileInputのname/accept/multipleまでは戻さないため、明示的に再同期する。
+        uploadForm.querySelector('input[name="contentType"]:checked').dispatchEvent(new Event('change'));
         resultMsg.textContent = '';
         resultMsg.classList.add('text-teal-600');
 

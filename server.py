@@ -31,6 +31,7 @@
 - POST /api/videos/reset-thumbnail  動画ごとの個別サムネイルを解除しサイト既定画像に戻す（JSON）※要ログイン
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
+- POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンIDの更新・解除（JSON）※要ログイン
 - POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
@@ -240,6 +241,12 @@ DEFAULT_ADS = [
 MAX_AD_LABEL_LENGTH = 40
 MAX_AD_CODE_LENGTH = 2000
 
+# アンロック後の視聴ページ(動画再生ページ・画像ページ両方)に常に表示するバナー広告。
+# 上記ad1/ad2(アンロック待ちの間だけ表示するゲート広告)とは別枠で、コンテンツ種別を問わず
+# 同じゾーンIDを使う。空欄にすると非表示になる。
+DEFAULT_CONTENT_PAGE_AD_ZONE_ID = "5968878"
+MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH = 100
+
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -406,6 +413,7 @@ def load_config():
             "points_per_image_upload": DEFAULT_POINTS_PER_IMAGE_UPLOAD,
             "points_view_threshold": DEFAULT_POINTS_VIEW_THRESHOLD,
             "min_redemption_points": DEFAULT_MIN_REDEMPTION_POINTS,
+            "content_page_ad_zone_id": DEFAULT_CONTENT_PAGE_AD_ZONE_ID,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -417,6 +425,7 @@ def load_config():
     config.setdefault("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD)
     config.setdefault("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
     config.setdefault("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)
+    config.setdefault("content_page_ad_zone_id", DEFAULT_CONTENT_PAGE_AD_ZONE_ID)
     return config
 
 
@@ -689,6 +698,20 @@ def validate_contact_url(url):
     if len(url) > MAX_CONTACT_URL_LENGTH or not re.match(r"^https?://", url):
         return None, "invalid_contact_url"
     return url, None
+
+
+def validate_content_page_ad_zone_id(zone_id):
+    """視聴ページ(動画・画像共通)のバナー広告ゾーンIDのバリデーション。
+
+    空文字/Noneは「非表示」として許可する。成功時は (zone_id_or_None, None) を、
+    失敗時は (None, error_code) を返す。
+    """
+    zone_id = (zone_id or "").strip()
+    if not zone_id:
+        return None, None
+    if len(zone_id) > MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH:
+        return None, "invalid_content_page_ad_zone_id"
+    return zone_id, None
 
 
 def validate_id_rejection_reason(reason):
@@ -1114,6 +1137,7 @@ class Handler(BaseHTTPRequestHandler):
             "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
             "minRedemptionPoints": config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS),
             "minRedemptionPointsYen": points_to_yen(config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)),
+            "contentPageAdZoneId": config.get("content_page_ad_zone_id", DEFAULT_CONTENT_PAGE_AD_ZONE_ID),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1202,6 +1226,7 @@ class Handler(BaseHTTPRequestHandler):
             "timeLimit": get_time_limit_status(video),
             "premiumLink": cta["premiumLink"],
             "premiumButtonText": cta["premiumButtonText"],
+            "contentPageAdZoneId": config.get("content_page_ad_zone_id", DEFAULT_CONTENT_PAGE_AD_ZONE_ID),
         })
 
     def handle_serve_video(self, video_id):
@@ -1458,6 +1483,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_premium_link()
+        elif path == "/api/set-content-page-ad":
+            if self.require_auth():
+                return
+            self.handle_set_content_page_ad()
         elif path == "/api/set-ads":
             if self.require_auth():
                 return
@@ -1623,6 +1652,29 @@ class Handler(BaseHTTPRequestHandler):
             "premiumLink": url,
             "premiumButtonText": button_text,
         })
+
+    def handle_set_content_page_ad(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        zone_id, error = validate_content_page_ad_zone_id(data.get("zoneId"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        config = load_config()
+        config["content_page_ad_zone_id"] = zone_id
+        save_config(config)
+
+        self.respond_json(200, {"ok": True, "zoneId": zone_id})
 
     def handle_set_ads(self):
         content_length = int(self.headers.get("Content-Length", 0))

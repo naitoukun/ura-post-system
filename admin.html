@@ -260,6 +260,29 @@
   </form>
 
   <div>
+    <h2 class="text-lg font-bold text-slate-800">視聴ページの広告</h2>
+    <p class="text-xs text-slate-400 mt-1">アンロック後の視聴ページ（動画再生ページ・画像ページの両方）に常に表示するバナー広告です。空欄にすると非表示になります。</p>
+  </div>
+
+  <div id="contentPageAdStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
+    現在の状態を確認しています…
+  </div>
+
+  <form id="contentPageAdForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">広告ゾーンID（空欄で非表示）</span>
+      <input type="text" name="zoneId" maxlength="100" placeholder="例: 5968878"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <button type="submit" id="contentPageAdSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      更新
+    </button>
+
+    <p id="contentPageAdResultMsg" class="text-sm"></p>
+  </form>
+
+  <div>
     <h2 class="text-lg font-bold text-slate-800">OGP画像設定</h2>
     <p class="text-xs text-slate-400 mt-1">動画リンクをSNS等でシェアした時に表示されるカード画像です（動画の中身とは無関係の、サイト共通のブランド画像）。png/jpg/webp、5MBまで。</p>
   </div>
@@ -312,6 +335,12 @@
   const adsForm      = document.getElementById('adsForm');
   const adsSubmitBtn = document.getElementById('adsSubmitBtn');
   const adsResultMsg = document.getElementById('adsResultMsg');
+
+  const contentPageAdStatusBox = document.getElementById('contentPageAdStatusBox');
+  const contentPageAdForm      = document.getElementById('contentPageAdForm');
+  const contentPageAdSubmitBtn = document.getElementById('contentPageAdSubmitBtn');
+  const contentPageAdResultMsg = document.getElementById('contentPageAdResultMsg');
+
   const logoutBtn    = document.getElementById('logoutBtn');
 
   const pointsStatusBox = document.getElementById('pointsStatusBox');
@@ -350,6 +379,7 @@
   refreshVideoList();
   refreshLinkStatus();
   refreshAdsStatus();
+  refreshContentPageAdStatus();
   refreshOgImageStatus();
   refreshPointsStatus();
   refreshCreatorList();
@@ -1211,6 +1241,53 @@
         linkSubmitBtn.disabled = false;
         linkResultMsg.textContent = '通信エラーが発生しました。';
         linkResultMsg.classList.add('text-rose-500');
+      });
+  });
+
+  function refreshContentPageAdStatus() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        contentPageAdStatusBox.textContent = data.contentPageAdZoneId
+          ? `現在のゾーンID: ${data.contentPageAdZoneId}`
+          : '現在は非表示（未設定）です。';
+        contentPageAdForm.elements.zoneId.value = data.contentPageAdZoneId || '';
+      })
+      .catch(() => {
+        contentPageAdStatusBox.textContent = '状態の取得に失敗しました。';
+      });
+  }
+
+  contentPageAdForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    contentPageAdResultMsg.textContent = '';
+    contentPageAdResultMsg.className = 'text-sm';
+    contentPageAdSubmitBtn.disabled = true;
+
+    const zoneId = new FormData(contentPageAdForm).get('zoneId');
+
+    fetch('/api/set-content-page-ad', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zoneId: zoneId }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        contentPageAdSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          contentPageAdResultMsg.textContent = data.zoneId ? `更新しました: ${data.zoneId}` : '非表示にしました。';
+          contentPageAdResultMsg.classList.add('text-teal-600');
+          refreshContentPageAdStatus();
+        } else {
+          contentPageAdResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          contentPageAdResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        contentPageAdSubmitBtn.disabled = false;
+        contentPageAdResultMsg.textContent = '通信エラーが発生しました。';
+        contentPageAdResultMsg.classList.add('text-rose-500');
       });
   });
 

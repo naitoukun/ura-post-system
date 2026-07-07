@@ -19,6 +19,8 @@
 <script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
 <!-- 画像ギャラリーのアンロック広告用(ExoClick AdProvider)。動画側は引き続きIMA SDK/VASTを使う -->
 <script async type="application/javascript" src="https://a.pemsrv.com/ad-provider.js"></script>
+<!-- アンロック後の視聴ページ(動画・画像共通)に表示するバナー広告用(ExoClick AdProvider) -->
+<script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
@@ -212,6 +214,11 @@
     >
       ♥ 【ファン限定】Fantia特設ページへ ♥
     </a>
+
+    <!-- 視聴ページ(動画・画像共通)のバナー広告。ゾーンIDはサーバー側の設定から差し込む -->
+    <div id="contentPageAdWrap" class="hidden-el w-full">
+      <ins id="contentPageAdIns" class="eas6a97888e14" data-zoneid=""></ins>
+    </div>
   </div>
 
   <!-- フッター（サイト実態と一致する表記） -->
@@ -260,6 +267,8 @@
   const mainVideo   = document.getElementById('mainVideo');
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
+  const contentPageAdWrap = document.getElementById('contentPageAdWrap');
+  const contentPageAdIns = document.getElementById('contentPageAdIns');
   const teaserVideo = document.getElementById('teaserVideo');
   const teaserImage = document.getElementById('teaserImage');
   const teaserCanvas= document.getElementById('teaserCanvas');
@@ -500,6 +509,13 @@
     stopTeaserPreview();
 
     videoInfoPromise.then((info) => {
+      // 視聴ページ(動画・画像共通)のバナー広告。ゾーンID未設定(空欄)なら非表示のまま。
+      if (info.contentPageAdZoneId) {
+        contentPageAdIns.setAttribute('data-zoneid', info.contentPageAdZoneId);
+        contentPageAdWrap.classList.remove('hidden-el');
+        (window.AdProvider = window.AdProvider || []).push({ serve: {} });
+      }
+
       if (info.contentType === 'image') {
         // 画像は「視聴し終わる」という概念が無いので、ミュート演出はせず
         // ギャラリーが開いたタイミングでそのまま目立つ色にする。
@@ -560,6 +576,7 @@
           timeLimit: status.timeLimit,
           premiumLink: status.premiumLink,
           premiumButtonText: status.premiumButtonText,
+          contentPageAdZoneId: status.contentPageAdZoneId,
         };
       })
       .catch(() => ({ linkRequired: true }));

@@ -1218,6 +1218,7 @@
 
     body.appendChild(buildVideoTimeLimitSection(video));
     body.appendChild(buildVideoCtaSection(video));
+    body.appendChild(buildVideoCtaTextSection(video));
     body.appendChild(buildVideoAdsSection(video));
     body.appendChild(buildVideoThumbnailSection(video));
 
@@ -1412,6 +1413,86 @@
         });
     });
     btnRow.appendChild(resetBtn);
+
+    body.appendChild(btnRow);
+    wrap.appendChild(body);
+
+    return wrap;
+  }
+
+  function buildVideoCtaTextSection(video) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = '応援ボタンの文言: ♥ ' + (video.effectiveCtaButtonText || '') + ' ♥（直接指定する）';
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const hint = document.createElement('p');
+    hint.className = 'text-[11px] text-slate-400';
+    hint.textContent =
+      '上の「誘導ボタン」より優先されます。空欄なら、投稿者アカウントの表示名から自動生成した文言（無ければ既定文言）が使われます。';
+    body.appendChild(hint);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 60;
+    input.placeholder = '例: ○○を応援する';
+    if (video.ctaButtonText) input.value = video.ctaButtonText;
+    input.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    body.appendChild(input);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-2';
+
+    function saveCtaText(value) {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+      fetch('/api/videos/set-cta-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: video.id, ctaButtonText: value }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    }
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'この投稿に適用';
+    applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+    applyBtn.addEventListener('click', () => saveCtaText(input.value));
+    btnRow.appendChild(applyBtn);
+
+    const resetTextBtn = document.createElement('button');
+    resetTextBtn.type = 'button';
+    resetTextBtn.textContent = '自動（既定）に戻す';
+    resetTextBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
+    resetTextBtn.addEventListener('click', () => {
+      input.value = '';
+      saveCtaText('');
+    });
+    btnRow.appendChild(resetTextBtn);
 
     body.appendChild(btnRow);
     wrap.appendChild(body);

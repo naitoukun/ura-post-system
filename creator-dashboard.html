@@ -443,6 +443,7 @@
     });
     linkRow.appendChild(copyBtn);
     body.appendChild(linkRow);
+    body.appendChild(buildCtaTextSection(item));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -473,6 +474,84 @@
 
     card.appendChild(body);
     return card;
+  }
+
+  function buildCtaTextSection(item) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = '応援ボタンの文言: ♥ ' + (item.effectiveCtaButtonText || '') + ' ♥（変更する）';
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const hint = document.createElement('p');
+    hint.className = 'text-[11px] text-slate-400';
+    hint.textContent = '空欄のままにすると、表示名から自動で「（表示名）を応援する」になります。';
+    body.appendChild(hint);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 60;
+    input.placeholder = '例: ○○を応援する';
+    if (item.ctaButtonText) input.value = item.ctaButtonText;
+    input.className = 'border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    body.appendChild(input);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-2';
+
+    function saveCtaText(value) {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+      fetch('/api/creator/content/set-cta-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, ctaButtonText: value }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshContentList();
+          } else {
+            msg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            msg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.classList.add('text-rose-500');
+        });
+    }
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'この投稿に適用';
+    applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+    applyBtn.addEventListener('click', () => saveCtaText(input.value));
+    btnRow.appendChild(applyBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.textContent = '自動（既定）に戻す';
+    resetBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
+    resetBtn.addEventListener('click', () => {
+      input.value = '';
+      saveCtaText('');
+    });
+    btnRow.appendChild(resetBtn);
+
+    body.appendChild(btnRow);
+    wrap.appendChild(body);
+    return wrap;
   }
 
   function refreshContentList() {

@@ -42,9 +42,9 @@
 - POST /api/creator/logout
 - GET  /api/creator/content  自分がアップロードしたコンテンツの一覧(JSON、ポイント状況込み)※要クリエイターログイン
 - GET  /api/creators/me  自分のポイント残高・交換申請履歴(JSON)※要クリエイターログイン
-- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード ※要クリエイターログイン
+- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は30秒以上・画像は5枚以上が必須）※要クリエイターログイン
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
-- POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（JSON）※要クリエイターログイン
+- POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（最低申請ポイント数あり、JSON）※要クリエイターログイン
 - GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
 - POST /api/creators/invite  招待URL+ログインコードを新規発行（JSON）※要ログイン(管理者)
 - POST /api/creators/approve-points  投稿1件を承認しポイント付与（サーバー側で状態を再検証）※要ログイン(管理者)
@@ -171,6 +171,14 @@ DEFAULT_POINTS_PER_VIDEO_UPLOAD = 100
 DEFAULT_POINTS_PER_IMAGE_UPLOAD = 100
 DEFAULT_POINTS_VIEW_THRESHOLD = 10
 
+# ギフト券交換は最低このポイント数から申請可能(既定1500pt)。サイト全体共通、管理画面(ポイント設定)で変更可能。
+DEFAULT_MIN_REDEMPTION_POINTS = 1500
+
+# 低品質・水増し目的の投稿を防ぐための最低ライン。クリエイターのセルフアップロードにのみ適用し
+# (管理者自身の/api/uploadには適用しない)、満たさない場合はアップロード自体を拒否する。
+MIN_CREATOR_VIDEO_DURATION_SECONDS = 30
+MIN_CREATOR_IMAGE_COUNT = 5
+
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
 CREATORS_LOCK = threading.Lock()
@@ -261,6 +269,7 @@ def load_config():
             "points_per_video_upload": DEFAULT_POINTS_PER_VIDEO_UPLOAD,
             "points_per_image_upload": DEFAULT_POINTS_PER_IMAGE_UPLOAD,
             "points_view_threshold": DEFAULT_POINTS_VIEW_THRESHOLD,
+            "min_redemption_points": DEFAULT_MIN_REDEMPTION_POINTS,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -271,6 +280,7 @@ def load_config():
     config.setdefault("points_per_video_upload", DEFAULT_POINTS_PER_VIDEO_UPLOAD)
     config.setdefault("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD)
     config.setdefault("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
+    config.setdefault("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)
     return config
 
 
@@ -481,6 +491,171 @@ def validate_creator_cta(name, url):
         return None, None, "invalid_creator_url"
 
     return name, url, None
+
+
+def _find_iso_bmff_box(data: bytes, target_types, start: int, end: int):
+    """ISO-BMFF(MP4/MOV/M4V)のボックス列から、指定タイプのボックスを1つ探す。
+
+    見つかれば (box_type, content_start, content_end) を、無ければNoneを返す。
+    """
+    pos = start
+    while pos + 8 <= end:
+        size = int.from_bytes(data[pos:pos + 4], "big")
+        box_type = data[pos + 4:pos + 8]
+        header_size = 8
+        if size == 1:
+            if pos + 16 > end:
+                return None
+            size = int.from_bytes(data[pos + 8:pos + 16], "big")
+            header_size = 16
+        elif size == 0:
+            size = end - pos
+        if size < header_size or pos + size > end:
+            return None
+        if box_type in target_types:
+            return box_type, pos + header_size, pos + size
+        pos += size
+    return None
+
+
+def get_mp4_duration_seconds(data: bytes):
+    """MP4/MOV/M4V(ISO-BMFF)の moov/mvhd ボックスから再生時間(秒)を読み取る。
+
+    パースに失敗した場合(壊れたファイル・未対応の構造等)はNoneを返す。
+    """
+    moov = _find_iso_bmff_box(data, {b"moov"}, 0, len(data))
+    if not moov:
+        return None
+    _, moov_start, moov_end = moov
+    mvhd = _find_iso_bmff_box(data, {b"mvhd"}, moov_start, moov_end)
+    if not mvhd:
+        return None
+    _, mvhd_start, mvhd_end = mvhd
+    if mvhd_end - mvhd_start < 4:
+        return None
+    version = data[mvhd_start]
+    try:
+        if version == 1:
+            # version(1)+flags(3)+creation(8)+modification(8)+timescale(4)+duration(8)
+            if mvhd_end - mvhd_start < 32:
+                return None
+            timescale = int.from_bytes(data[mvhd_start + 20:mvhd_start + 24], "big")
+            duration = int.from_bytes(data[mvhd_start + 24:mvhd_start + 32], "big")
+        else:
+            # version(1)+flags(3)+creation(4)+modification(4)+timescale(4)+duration(4)
+            if mvhd_end - mvhd_start < 20:
+                return None
+            timescale = int.from_bytes(data[mvhd_start + 12:mvhd_start + 16], "big")
+            duration = int.from_bytes(data[mvhd_start + 16:mvhd_start + 20], "big")
+    except (ValueError, OverflowError):
+        return None
+    if not timescale:
+        return None
+    return duration / timescale
+
+
+def _read_ebml_vint(data: bytes, pos: int, keep_marker: bool):
+    """EBMLの可変長整数を読む。(値, 消費バイト数)を返す。読めなければNone。
+
+    keep_marker=True の場合は要素ID用(長さマーカーのビットも値に含めたまま)、
+    False の場合はサイズ用(長さマーカーを除去した実際の値)として読む。
+    """
+    if pos >= len(data):
+        return None
+    first = data[pos]
+    if first == 0:
+        return None
+    length = 1
+    mask = 0x80
+    while not (first & mask):
+        mask >>= 1
+        length += 1
+        if length > 8:
+            return None
+    if pos + length > len(data):
+        return None
+    if keep_marker:
+        value = first
+        for i in range(1, length):
+            value = (value << 8) | data[pos + i]
+    else:
+        value = first & (mask - 1)
+        for i in range(1, length):
+            value = (value << 8) | data[pos + i]
+    return value, length
+
+
+def _find_ebml_child(data: bytes, target_id: bytes, start: int, end: int):
+    """EBML(WebM/Matroska)の子要素列から、指定IDの要素を1つ探す。
+
+    見つかれば (content_start, content_end) を、無ければNoneを返す。
+    """
+    pos = start
+    while pos < end:
+        id_result = _read_ebml_vint(data, pos, keep_marker=True)
+        if not id_result:
+            return None
+        elem_id_value, id_len = id_result
+        elem_id = elem_id_value.to_bytes(id_len, "big")
+        pos += id_len
+        size_result = _read_ebml_vint(data, pos, keep_marker=False)
+        if not size_result:
+            return None
+        size, size_len = size_result
+        pos += size_len
+        content_end = min(pos + size, end)
+        if elem_id == target_id:
+            return pos, content_end
+        pos = content_end
+    return None
+
+
+def get_webm_duration_seconds(data: bytes):
+    """WebM(Matroska/EBML)の Segment > Info > (TimestampScale, Duration) から再生時間(秒)を読み取る。
+
+    パースに失敗した場合はNoneを返す。
+    """
+    segment = _find_ebml_child(data, b"\x18\x53\x80\x67", 0, len(data))
+    if not segment:
+        return None
+    info = _find_ebml_child(data, b"\x15\x49\xa9\x66", segment[0], segment[1])
+    if not info:
+        return None
+
+    timescale_ns = 1_000_000  # 既定(ナノ秒単位)。TimestampScale要素が無い場合はこれを使う
+    timescale_range = _find_ebml_child(data, b"\x2a\xd7\xb1", info[0], info[1])
+    if timescale_range:
+        raw = data[timescale_range[0]:timescale_range[1]]
+        if raw:
+            timescale_ns = int.from_bytes(raw, "big")
+
+    duration_range = _find_ebml_child(data, b"\x44\x89", info[0], info[1])
+    if not duration_range:
+        return None
+    raw = data[duration_range[0]:duration_range[1]]
+    try:
+        if len(raw) == 4:
+            duration_units = struct.unpack(">f", raw)[0]
+        elif len(raw) == 8:
+            duration_units = struct.unpack(">d", raw)[0]
+        else:
+            return None
+    except struct.error:
+        return None
+
+    if not timescale_ns:
+        return None
+    return duration_units * timescale_ns / 1_000_000_000
+
+
+def get_video_duration_seconds(content: bytes, ext: str):
+    """拡張子に応じた動画の再生時間(秒)を返す。パース失敗/未対応形式はNoneを返す。"""
+    ext = ext.lower()
+    if ext in (".mp4", ".mov", ".m4v"):
+        return get_mp4_duration_seconds(content)
+    if ext == ".webm":
+        return get_webm_duration_seconds(content)
+    return None
 
 
 def parse_multipart(body: bytes, boundary: bytes):
@@ -723,6 +898,7 @@ class Handler(BaseHTTPRequestHandler):
             "pointsPerVideoUpload": config.get("points_per_video_upload", DEFAULT_POINTS_PER_VIDEO_UPLOAD),
             "pointsPerImageUpload": config.get("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD),
             "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
+            "minRedemptionPoints": config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1222,6 +1398,7 @@ class Handler(BaseHTTPRequestHandler):
         points_per_video_upload = data.get("pointsPerVideoUpload")
         points_per_image_upload = data.get("pointsPerImageUpload")
         points_view_threshold = data.get("pointsViewThreshold")
+        min_redemption_points = data.get("minRedemptionPoints")
 
         def is_positive_int(value):
             return isinstance(value, int) and not isinstance(value, bool) and value > 0
@@ -1230,6 +1407,7 @@ class Handler(BaseHTTPRequestHandler):
             not is_positive_int(points_per_video_upload)
             or not is_positive_int(points_per_image_upload)
             or not is_positive_int(points_view_threshold)
+            or not is_positive_int(min_redemption_points)
         ):
             self.respond_json(400, {"ok": False, "error": "invalid_points_config"})
             return
@@ -1238,6 +1416,7 @@ class Handler(BaseHTTPRequestHandler):
         config["points_per_video_upload"] = points_per_video_upload
         config["points_per_image_upload"] = points_per_image_upload
         config["points_view_threshold"] = points_view_threshold
+        config["min_redemption_points"] = min_redemption_points
         save_config(config)
 
         self.respond_json(200, {
@@ -1245,6 +1424,7 @@ class Handler(BaseHTTPRequestHandler):
             "pointsPerVideoUpload": points_per_video_upload,
             "pointsPerImageUpload": points_per_image_upload,
             "pointsViewThreshold": points_view_threshold,
+            "minRedemptionPoints": min_redemption_points,
         })
 
     def handle_set_video_ads(self):
@@ -1488,6 +1668,13 @@ class Handler(BaseHTTPRequestHandler):
             if len(image_files) > MAX_IMAGES_PER_GALLERY:
                 self.respond_json(400, {"ok": False, "error": "too_many_images"})
                 return
+            if owner_creator_id and len(image_files) < MIN_CREATOR_IMAGE_COUNT:
+                self.respond_json(400, {
+                    "ok": False,
+                    "error": "too_few_images",
+                    "minImageCount": MIN_CREATOR_IMAGE_COUNT,
+                })
+                return
             for image_file in image_files:
                 ext = os.path.splitext(image_file["filename"] or "")[1].lower()
                 if ext not in IMAGE_ALLOWED_EXTENSIONS:
@@ -1539,6 +1726,19 @@ class Handler(BaseHTTPRequestHandler):
         if ext not in ALLOWED_EXTENSIONS:
             self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
             return
+
+        if owner_creator_id:
+            duration_seconds = get_video_duration_seconds(video_file["content"], ext)
+            if duration_seconds is None:
+                self.respond_json(400, {"ok": False, "error": "could_not_determine_video_length"})
+                return
+            if duration_seconds < MIN_CREATOR_VIDEO_DURATION_SECONDS:
+                self.respond_json(400, {
+                    "ok": False,
+                    "error": "video_too_short",
+                    "minVideoDurationSeconds": MIN_CREATOR_VIDEO_DURATION_SECONDS,
+                })
+                return
 
         video_id = secrets.token_urlsafe(9)
         stored_filename = video_id + ext
@@ -1843,6 +2043,12 @@ class Handler(BaseHTTPRequestHandler):
         points = data.get("points")
         if not isinstance(points, int) or isinstance(points, bool) or points <= 0:
             self.respond_json(400, {"ok": False, "error": "invalid_points"})
+            return
+
+        config = load_config()
+        min_redemption_points = config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)
+        if points < min_redemption_points:
+            self.respond_json(400, {"ok": False, "error": "below_minimum_redemption", "minRedemptionPoints": min_redemption_points})
             return
 
         with CREATORS_LOCK:

@@ -62,9 +62,10 @@
     <span class="text-sm font-medium text-slate-700">Amazonギフト券への交換申請</span>
     <label class="flex flex-col gap-1">
       <span class="text-xs text-slate-500">申請するポイント数</span>
-      <input type="number" name="points" min="1" step="1" required placeholder="例: 500"
+      <input type="number" id="redemptionPointsInput" name="points" min="1" step="1" required placeholder="例: 500"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
+    <p id="redemptionMinHint" class="text-xs text-slate-400"></p>
     <button type="submit" id="redemptionSubmitBtn" class="btn-primary rounded-lg py-2.5 text-sm font-bold">
       交換を申請する
     </button>
@@ -92,6 +93,7 @@
       <input id="fileInput" type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
         class="text-sm" />
     </label>
+    <p class="text-xs text-slate-400">動画は30秒以上、画像は5枚以上からアップロードできます（ポイント対象外の水増し投稿を防ぐためです）。</p>
 
     <label class="flex items-center gap-2">
       <input type="checkbox" name="timeLimitEnabled" class="w-4 h-4" />
@@ -140,6 +142,18 @@
   const redemptionSubmitBtn = document.getElementById('redemptionSubmitBtn');
   const redemptionResultMsg = document.getElementById('redemptionResultMsg');
   const redemptionHistoryBox = document.getElementById('redemptionHistoryBox');
+  const redemptionPointsInput = document.getElementById('redemptionPointsInput');
+  const redemptionMinHint = document.getElementById('redemptionMinHint');
+
+  fetch('/site-config', { cache: 'no-store' })
+    .then((res) => res.json())
+    .then((data) => {
+      if (data.minRedemptionPoints) {
+        redemptionMinHint.textContent = '最低' + data.minRedemptionPoints + 'ptから交換申請できます。';
+        redemptionPointsInput.min = data.minRedemptionPoints;
+      }
+    })
+    .catch(() => {});
 
   let currentBalance = 0;
   let currentRedemptions = [];
@@ -173,6 +187,25 @@
       }
     });
   });
+
+  function describeUploadError(data) {
+    switch (data.error) {
+      case 'video_too_short':
+        return '動画が短すぎます（' + (data.minVideoDurationSeconds || 30) + '秒以上が必要です）。';
+      case 'could_not_determine_video_length':
+        return '動画の長さを判定できませんでした。別の形式（mp4推奨）でお試しください。';
+      case 'too_few_images':
+        return '画像の枚数が足りません（' + (data.minImageCount || 5) + '枚以上が必要です）。';
+      case 'too_many_images':
+        return '画像の枚数が多すぎます。';
+      case 'unsupported_file_type':
+        return '対応していないファイル形式です。';
+      case 'file_too_large':
+        return 'ファイルサイズが大きすぎます。';
+      default:
+        return null;
+    }
+  }
 
   uploadForm.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -212,7 +245,7 @@
         if (checkedRadio) checkedRadio.dispatchEvent(new Event('change'));
         refreshContentList();
       } else {
-        resultMsg.textContent = 'アップロードに失敗しました（' + (data.error || xhr.status) + '）';
+        resultMsg.textContent = describeUploadError(data) || ('アップロードに失敗しました（' + (data.error || xhr.status) + '）');
         resultMsg.classList.add('text-rose-500');
       }
     };
@@ -280,6 +313,12 @@
           redemptionResultMsg.classList.add('text-teal-600');
           redemptionForm.reset();
           refreshCreatorInfo();
+        } else if (data.error === 'below_minimum_redemption') {
+          redemptionResultMsg.textContent = '最低' + data.minRedemptionPoints + 'ptから交換申請できます。';
+          redemptionResultMsg.classList.add('text-rose-500');
+        } else if (data.error === 'insufficient_balance') {
+          redemptionResultMsg.textContent = 'ポイント残高が足りません。';
+          redemptionResultMsg.classList.add('text-rose-500');
         } else {
           redemptionResultMsg.textContent = '申請に失敗しました（' + (data.error || status) + '）';
           redemptionResultMsg.classList.add('text-rose-500');

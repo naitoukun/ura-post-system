@@ -140,6 +140,11 @@
       <input type="number" name="pointsViewThreshold" required min="1" step="1" placeholder="10"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">ギフト券交換の最低申請ポイント数</span>
+      <input type="number" name="minRedemptionPoints" required min="1" step="1" placeholder="1500"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
     <p class="text-xs text-slate-400">個別の子ごとに変えたい場合は、下の「女の子アカウント管理」の一覧から個別設定できます。</p>
     <button type="submit" id="pointsSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
       更新
@@ -504,10 +509,12 @@
       .then((res) => res.json())
       .then((data) => {
         pointsStatusBox.textContent =
-          `既定の付与ポイント: 動画${data.pointsPerVideoUpload}pt / 画像${data.pointsPerImageUpload}pt / 24時間以内の最低閲覧数: ${data.pointsViewThreshold}`;
+          `既定の付与ポイント: 動画${data.pointsPerVideoUpload}pt / 画像${data.pointsPerImageUpload}pt / `
+          + `24時間以内の最低閲覧数: ${data.pointsViewThreshold} / ギフト券交換の最低申請ポイント数: ${data.minRedemptionPoints}pt`;
         pointsForm.elements['pointsPerVideoUpload'].value = data.pointsPerVideoUpload;
         pointsForm.elements['pointsPerImageUpload'].value = data.pointsPerImageUpload;
         pointsForm.elements['pointsViewThreshold'].value = data.pointsViewThreshold;
+        pointsForm.elements['minRedemptionPoints'].value = data.minRedemptionPoints;
       })
       .catch(() => {
         pointsStatusBox.textContent = '状態の取得に失敗しました。';
@@ -529,6 +536,7 @@
         pointsPerVideoUpload: Number(formData.get('pointsPerVideoUpload')),
         pointsPerImageUpload: Number(formData.get('pointsPerImageUpload')),
         pointsViewThreshold: Number(formData.get('pointsViewThreshold')),
+        minRedemptionPoints: Number(formData.get('minRedemptionPoints')),
       }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))

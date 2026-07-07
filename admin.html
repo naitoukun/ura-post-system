@@ -680,6 +680,16 @@
       creator.status === 'active' ? 'アクティブ' : '招待中（未登録）',
       creator.status === 'active' ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'
     );
+
+    const idBadgeMap = {
+      approved: ['身分証確認済み', 'bg-teal-50 text-teal-700'],
+      pending: ['身分証審査中', 'bg-amber-50 text-amber-700'],
+      rejected: ['身分証却下', 'bg-rose-50 text-rose-600'],
+      not_submitted: ['身分証未提出', 'bg-slate-100 text-slate-500'],
+    };
+    const idBadge = idBadgeMap[creator.idVerificationStatus] || idBadgeMap.not_submitted;
+    addBadge(idBadge[0], idBadge[1]);
+
     addBadge('残高: ' + (creator.pointsBalance || 0).toLocaleString('ja-JP') + 'pt（' + (creator.pointsBalanceYen || 0).toLocaleString('ja-JP') + '円分）', 'bg-slate-100 text-slate-600');
 
     const pendingCount = (creator.redemptionRequests || []).filter((r) => r.status === 'pending').length;
@@ -750,6 +760,108 @@
     });
     contactWrap.appendChild(contactSaveBtn);
     body.appendChild(contactWrap);
+
+    // 年齢確認(身分証提出の審査)。承認されるまでセルフアップロードはできない
+    const idWrap = document.createElement('div');
+    idWrap.className = 'flex flex-col gap-2 border border-slate-100 rounded-lg p-3';
+
+    const idStatusRow = document.createElement('div');
+    idStatusRow.className = 'flex items-center justify-between gap-2';
+
+    const idStatusLabelMap = {
+      approved: ['身分証: 確認済み', 'text-teal-600'],
+      pending: ['身分証: 審査中', 'text-amber-600'],
+      rejected: ['身分証: 却下済み', 'text-rose-500'],
+      not_submitted: ['身分証: 未提出', 'text-slate-400'],
+    };
+    const idStatusInfo = idStatusLabelMap[creator.idVerificationStatus] || idStatusLabelMap.not_submitted;
+    const idStatusLabel = document.createElement('span');
+    idStatusLabel.textContent = idStatusInfo[0];
+    idStatusLabel.className = 'text-xs font-medium ' + idStatusInfo[1];
+    idStatusRow.appendChild(idStatusLabel);
+
+    if (creator.hasIdDocument) {
+      const viewLink = document.createElement('a');
+      viewLink.href = '/api/creators/id-document?creatorId=' + encodeURIComponent(creator.id);
+      viewLink.target = '_blank';
+      viewLink.rel = 'noopener noreferrer';
+      viewLink.textContent = '提出書類を見る ↗';
+      viewLink.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
+      idStatusRow.appendChild(viewLink);
+    }
+    idWrap.appendChild(idStatusRow);
+
+    if (creator.idRejectionReason) {
+      const reasonText = document.createElement('p');
+      reasonText.className = 'text-[11px] text-rose-500';
+      reasonText.textContent = '却下理由: ' + creator.idRejectionReason;
+      idWrap.appendChild(reasonText);
+    }
+
+    if (creator.hasIdDocument && creator.idVerificationStatus !== 'approved') {
+      const idActionRow = document.createElement('div');
+      idActionRow.className = 'flex gap-2';
+
+      const approveIdBtn = document.createElement('button');
+      approveIdBtn.type = 'button';
+      approveIdBtn.textContent = '承認する';
+      approveIdBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+      approveIdBtn.addEventListener('click', () => {
+        approveIdBtn.disabled = true;
+        fetch('/api/creators/approve-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ creatorId: creator.id }),
+        })
+          .then((res) => res.json().then((data) => ({ status: res.status, data })))
+          .then(({ status, data }) => {
+            if (redirectIfUnauthenticated(status)) return;
+            if (status === 200 && data.ok) {
+              refreshCreatorList();
+            } else {
+              approveIdBtn.disabled = false;
+              alert('承認に失敗しました（' + (data.error || status) + '）');
+            }
+          })
+          .catch(() => {
+            approveIdBtn.disabled = false;
+            alert('通信エラーが発生しました。');
+          });
+      });
+      idActionRow.appendChild(approveIdBtn);
+
+      const rejectIdBtn = document.createElement('button');
+      rejectIdBtn.type = 'button';
+      rejectIdBtn.textContent = '却下する';
+      rejectIdBtn.className = 'flex-1 border border-rose-300 text-rose-500 rounded-lg py-1.5 text-xs font-medium hover:bg-rose-50';
+      rejectIdBtn.addEventListener('click', () => {
+        const reason = window.prompt('却下理由（任意・本人に表示されます）', '') || '';
+        rejectIdBtn.disabled = true;
+        fetch('/api/creators/reject-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ creatorId: creator.id, reason: reason }),
+        })
+          .then((res) => res.json().then((data) => ({ status: res.status, data })))
+          .then(({ status, data }) => {
+            if (redirectIfUnauthenticated(status)) return;
+            if (status === 200 && data.ok) {
+              refreshCreatorList();
+            } else {
+              rejectIdBtn.disabled = false;
+              alert('却下に失敗しました（' + (data.error || status) + '）');
+            }
+          })
+          .catch(() => {
+            rejectIdBtn.disabled = false;
+            alert('通信エラーが発生しました。');
+          });
+      });
+      idActionRow.appendChild(rejectIdBtn);
+
+      idWrap.appendChild(idActionRow);
+    }
+    body.appendChild(idWrap);
 
     // 手動ポイント調整
     const adjustWrap = document.createElement('div');

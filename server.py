@@ -49,6 +49,7 @@
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
 - POST /api/creator/content/set-cta-text  自分の投稿の誘導ボタン文言・リンク先の個別指定・解除（所有者チェック有り、JSON）※要クリエイターログイン
 - POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（最低申請ポイント数あり、JSON）※要クリエイターログイン
+- POST /api/creator/submit-id  年齢確認用の身分証提出・再提出（multipart/form-data）※要クリエイターログイン
 - GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
 - POST /api/creators/invite  招待URL+ログインコードを新規発行（JSON）※要ログイン(管理者)
 - POST /api/creators/approve-points  投稿1件を承認しポイント付与（サーバー側で状態を再検証）※要ログイン(管理者)
@@ -56,6 +57,9 @@
 - POST /api/creators/fulfill-redemption  ギフト券交換申請を対応済みにする（JSON）※要ログイン(管理者)
 - POST /api/creators/set-points-override  クリエイターごとの動画/画像付与ポイントの個別上書き（null=サイト既定値を使用）（JSON）※要ログイン(管理者)
 - POST /api/creators/set-contact  クリエイターの連絡先リンク(SNS等)の設定・更新・解除（JSON）※要ログイン(管理者)
+- GET  /api/creators/id-document  提出された身分証の画像/PDFの配信（機微情報のため管理者のみ）※要ログイン(管理者)
+- POST /api/creators/approve-id  提出された身分証を承認し、セルフアップロードを解禁する（JSON）※要ログイン(管理者)
+- POST /api/creators/reject-id  提出された身分証を却下する（理由は任意入力、JSON）※要ログイン(管理者)
 - POST /api/creators/delete  クリエイターアカウントの削除（投稿済みの全コンテンツも連鎖削除）（JSON）※要ログイン(管理者)
 
 ※「要ログイン」の操作は、/api/login で発行されたセッションCookieが無いと401になる。
@@ -125,6 +129,14 @@ MAX_IMAGES_PER_GALLERY = 30
 DEFAULT_OG_IMAGE_PATH = os.path.join(BASE_DIR, "og-image.png")
 OG_IMAGE_ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_OG_IMAGE_BYTES = 5 * 1024 * 1024  # 5MB
+
+# クリエイターの年齢確認用の身分証提出。18歳未満のコンテンツを扱わないための本人確認であり、
+# 承認(id_verification_status == "approved")されるまでセルフアップロードはできない。
+# 提出物は本人確認書類という機微情報のため、管理者のみが閲覧できる専用ルートでのみ配信する
+# (静的ファイルとして誰でも見れる場所には絶対に置かない)。
+ID_DOCUMENT_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+MAX_ID_DOCUMENT_BYTES = 10 * 1024 * 1024  # 10MB
+MAX_ID_REJECTION_REASON_LENGTH = 300
 # og:image等はSNS側のクローラーが絶対URLで取得するため、公開ドメインを固定で持っておく。
 # 別ドメインで動作確認する場合は環境変数で上書きできるようにしておく。
 PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://ura-post.com")
@@ -609,6 +621,16 @@ def validate_contact_url(url):
     return url, None
 
 
+def validate_id_rejection_reason(reason):
+    """身分証を却下する際の理由(任意入力)のバリデーション。"""
+    reason = (reason or "").strip()
+    if not reason:
+        return None, None
+    if len(reason) > MAX_ID_REJECTION_REASON_LENGTH:
+        return None, "invalid_reason"
+    return reason, None
+
+
 def _find_iso_bmff_box(data: bytes, target_types, start: int, end: int):
     """ISO-BMFF(MP4/MOV/M4V)のボックス列から、指定タイプのボックスを1つ探す。
 
@@ -1003,6 +1025,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_get_own_creator_info()
+        elif path == "/api/creators/id-document":
+            if self.require_auth():
+                return
+            self.handle_creators_id_document(parse_qs(split.query))
         else:
             self.send_error(404, "Not Found")
 
@@ -1396,6 +1422,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_creator_request_redemption()
+        elif path == "/api/creator/submit-id":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_submit_id()
         elif path == "/api/set-points":
             if self.require_auth():
                 return
@@ -1424,6 +1454,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_set_contact()
+        elif path == "/api/creators/approve-id":
+            if self.require_auth():
+                return
+            self.handle_creators_approve_id()
+        elif path == "/api/creators/reject-id":
+            if self.require_auth():
+                return
+            self.handle_creators_reject_id()
         elif path == "/api/creators/delete":
             if self.require_auth():
                 return
@@ -1844,6 +1882,14 @@ class Handler(BaseHTTPRequestHandler):
         owner_creator_id はサーバー側(セッション)から決まる値のみを渡すこと
         (クライアントが送ってきた値をそのまま信用してはいけない)。
         """
+        if owner_creator_id:
+            # 年齢確認(身分証提出→管理者承認)が済むまでは、クリエイターのセルフアップロードを禁止する。
+            # 管理者本人のアップロード(owner_creator_id無し)には適用しない。
+            creator = find_creator(load_creators(), owner_creator_id)
+            if not creator or creator.get("id_verification_status") != "approved":
+                self.respond_json(403, {"ok": False, "error": "id_verification_required"})
+                return
+
         content_type_header = self.headers.get("Content-Type", "")
         boundary_match = re.search(r"boundary=(.+)", content_type_header)
         content_length = int(self.headers.get("Content-Length", 0))
@@ -2082,6 +2128,66 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
+    def handle_creator_submit_id(self):
+        """クリエイター自身による年齢確認用の身分証提出(multipart/form-data)。
+
+        再提出(却下後の再申請等)も同じエンドポイントで受け付け、
+        既存の提出物があれば上書きする。承認済みの状態でも再提出は可能。
+        """
+        creator_id = self.get_creator_id()
+        content_type_header = self.headers.get("Content-Type", "")
+        boundary_match = re.search(r"boundary=(.+)", content_type_header)
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        if not content_type_header.startswith("multipart/form-data") or not boundary_match:
+            self.respond_json(400, {"ok": False, "error": "invalid_content_type"})
+            return
+
+        if content_length <= 0 or content_length > MAX_ID_DOCUMENT_BYTES:
+            self.respond_json(413, {"ok": False, "error": "file_too_large"})
+            return
+
+        boundary = boundary_match.group(1).strip('"').encode("utf-8")
+        body = self.rfile.read(content_length)
+        fields, files = parse_multipart(body, boundary)
+
+        id_file = first_file(files, "idDocument")
+        if not id_file:
+            self.respond_json(400, {"ok": False, "error": "missing_id_document"})
+            return
+
+        ext = os.path.splitext(id_file["filename"] or "")[1].lower()
+        if ext not in ID_DOCUMENT_ALLOWED_EXTENSIONS:
+            self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            # 拡張子が変わった場合に前の提出物が残らないよう、既存分は一旦削除する
+            old_filename = creator.get("id_document_filename")
+            if old_filename:
+                old_path = os.path.join(UPLOAD_DIR, old_filename)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+
+            new_filename = "iddoc_" + creator_id + ext
+            with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
+                f.write(id_file["content"])
+
+            creator["id_document_filename"] = new_filename
+            creator["id_verification_status"] = "pending"
+            creator["id_submitted_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            creator["id_reviewed_at"] = None
+            creator["id_rejection_reason"] = None
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "idVerificationStatus": "pending"})
+
     def _delete_video_entry(self, video_id, video):
         """動画/画像ギャラリー本体・サムネイル・videos.json中のエントリを削除する共通処理。"""
         if video.get("content_type") == "image":
@@ -2309,6 +2415,8 @@ class Handler(BaseHTTPRequestHandler):
             ],
             "uploadsToday": get_todays_upload_count(creator),
             "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
+            "idVerificationStatus": creator.get("id_verification_status", "not_submitted"),
+            "idRejectionReason": creator.get("id_rejection_reason"),
         })
 
     def handle_creator_request_redemption(self):
@@ -2377,6 +2485,11 @@ class Handler(BaseHTTPRequestHandler):
                 "contactUrl": c.get("contact_url"),
                 "uploadsToday": get_todays_upload_count(c),
                 "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
+                "idVerificationStatus": c.get("id_verification_status", "not_submitted"),
+                "hasIdDocument": bool(c.get("id_document_filename")),
+                "idSubmittedAt": c.get("id_submitted_at"),
+                "idReviewedAt": c.get("id_reviewed_at"),
+                "idRejectionReason": c.get("id_rejection_reason"),
             }
             for c in sorted(creators, key=lambda c: c.get("invited_at", ""), reverse=True)
         ]
@@ -2419,6 +2532,11 @@ class Handler(BaseHTTPRequestHandler):
                 "points_per_video_upload": None,
                 "points_per_image_upload": None,
                 "contact_url": contact_url,
+                "id_verification_status": "not_submitted",
+                "id_document_filename": None,
+                "id_submitted_at": None,
+                "id_reviewed_at": None,
+                "id_rejection_reason": None,
             }
             creators.append(creator)
             save_creators(creators)
@@ -2625,6 +2743,85 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True, "contactUrl": contact_url})
 
+    def handle_creators_id_document(self, query):
+        """管理者のみが閲覧できる、クリエイター提出の身分証の配信。
+
+        機微情報のため一覧等には一切出さず、このルート経由でのみ(要admin認証)アクセスできる。
+        """
+        creator_id = (query.get("creatorId") or [None])[0]
+        creators = load_creators()
+        creator = find_creator(creators, creator_id)
+        filename = creator.get("id_document_filename") if creator else None
+        if not filename:
+            self.send_error(404, "Not Found")
+            return
+        path = os.path.join(UPLOAD_DIR, filename)
+        if not os.path.exists(path):
+            self.send_error(404, "Not Found")
+            return
+        content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        self.serve_file(path, content_type, extra_headers={"Cache-Control": "no-store"})
+
+    def handle_creators_approve_id(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator or not creator.get("id_document_filename"):
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["id_verification_status"] = "approved"
+            creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            creator["id_rejection_reason"] = None
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "idVerificationStatus": "approved"})
+
+    def handle_creators_reject_id(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+        reason, error = validate_id_rejection_reason(data.get("reason"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator or not creator.get("id_document_filename"):
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["id_verification_status"] = "rejected"
+            creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            creator["id_rejection_reason"] = reason
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "idVerificationStatus": "rejected", "reason": reason})
+
     def handle_creators_delete(self):
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length <= 0 or content_length > 2_000:
@@ -2641,7 +2838,8 @@ class Handler(BaseHTTPRequestHandler):
 
         with CREATORS_LOCK:
             creators = load_creators()
-            if not find_creator(creators, creator_id):
+            creator = find_creator(creators, creator_id)
+            if not creator:
                 self.respond_json(404, {"ok": False, "error": "not_found"})
                 return
 
@@ -2649,6 +2847,13 @@ class Handler(BaseHTTPRequestHandler):
             owned_videos = [v for v in load_videos() if v.get("owner_creator_id") == creator_id]
             for video in owned_videos:
                 self._delete_video_entry(video["id"], video)
+
+            # 提出済みの身分証(機微情報)も一緒に削除する
+            id_document_filename = creator.get("id_document_filename")
+            if id_document_filename:
+                id_document_path = os.path.join(UPLOAD_DIR, id_document_filename)
+                if os.path.exists(id_document_path):
+                    os.remove(id_document_path)
 
             remaining_creators = [c for c in creators if c["id"] != creator_id]
             save_creators(remaining_creators)

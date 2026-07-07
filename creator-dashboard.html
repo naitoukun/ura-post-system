@@ -59,6 +59,21 @@
     <span id="pointsYenText" class="text-sm font-medium text-slate-500">-</span>
   </div>
 
+  <div class="card rounded-2xl p-4 flex flex-col gap-3">
+    <span class="text-sm font-medium text-slate-700">年齢確認（身分証提出）</span>
+    <p id="idVerificationStatusText" class="text-sm">-</p>
+    <div id="idVerificationSubmitWrap" class="hidden flex flex-col gap-2">
+      <p class="text-xs text-slate-400">
+        運転免許証・パスポート等、生年月日と顔写真が確認できる身分証の画像（またはPDF）をアップロードしてください。承認されるまでコンテンツのアップロードはできません。
+      </p>
+      <input id="idDocumentInput" type="file" accept="image/*,.pdf" class="text-sm" />
+      <button id="idDocumentSubmitBtn" type="button" class="btn-primary rounded-lg py-2 text-sm font-bold">
+        提出する
+      </button>
+      <p id="idDocumentResultMsg" class="text-xs min-h-[1em]"></p>
+    </div>
+  </div>
+
   <form id="redemptionForm" class="card rounded-2xl p-4 flex flex-col gap-3">
     <span class="text-sm font-medium text-slate-700">Amazonギフト券への交換申請</span>
     <label class="flex flex-col gap-1">
@@ -76,7 +91,11 @@
 
   <p id="dailyUploadStatusText" class="text-xs text-slate-400"></p>
 
-  <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+  <p id="uploadBlockedMsg" class="hidden card rounded-2xl p-4 text-sm text-rose-500">
+    アップロードには身分証の承認が必要です。上の「年齢確認」から提出してください。
+  </p>
+
+  <form id="uploadForm" class="hidden card rounded-2xl p-4 flex flex-col gap-4">
     <div class="flex flex-col gap-1">
       <span class="text-sm font-medium text-slate-700">コンテンツの種類</span>
       <div class="flex gap-4">
@@ -151,6 +170,13 @@
   const pointsBalanceText = document.getElementById('pointsBalanceText');
   const pointsYenText = document.getElementById('pointsYenText');
   const dailyUploadStatusText = document.getElementById('dailyUploadStatusText');
+  const uploadBlockedMsg = document.getElementById('uploadBlockedMsg');
+
+  const idVerificationStatusText = document.getElementById('idVerificationStatusText');
+  const idVerificationSubmitWrap = document.getElementById('idVerificationSubmitWrap');
+  const idDocumentInput = document.getElementById('idDocumentInput');
+  const idDocumentSubmitBtn = document.getElementById('idDocumentSubmitBtn');
+  const idDocumentResultMsg = document.getElementById('idDocumentResultMsg');
 
   const redemptionForm = document.getElementById('redemptionForm');
   const redemptionSubmitBtn = document.getElementById('redemptionSubmitBtn');
@@ -279,6 +305,74 @@
   function formatNumber(n) {
     return (n || 0).toLocaleString('ja-JP');
   }
+
+  function updateIdVerificationUI(status, rejectionReason) {
+    const isApproved = status === 'approved';
+
+    if (status === 'approved') {
+      idVerificationStatusText.textContent = '確認済みです。コンテンツをアップロードできます。';
+      idVerificationStatusText.className = 'text-sm text-teal-600';
+      idVerificationSubmitWrap.classList.add('hidden');
+    } else if (status === 'pending') {
+      idVerificationStatusText.textContent = '提出済み・審査中です。しばらくお待ちください。';
+      idVerificationStatusText.className = 'text-sm text-amber-600';
+      idVerificationSubmitWrap.classList.remove('hidden');
+    } else if (status === 'rejected') {
+      idVerificationStatusText.textContent = '却下されました' + (rejectionReason ? '（理由: ' + rejectionReason + '）' : '') + '。再提出してください。';
+      idVerificationStatusText.className = 'text-sm text-rose-500';
+      idVerificationSubmitWrap.classList.remove('hidden');
+    } else {
+      idVerificationStatusText.textContent = '身分証が未提出です。承認されるまでコンテンツはアップロードできません。';
+      idVerificationStatusText.className = 'text-sm text-slate-500';
+      idVerificationSubmitWrap.classList.remove('hidden');
+    }
+
+    uploadForm.classList.toggle('hidden', !isApproved);
+    uploadBlockedMsg.classList.toggle('hidden', isApproved);
+  }
+
+  idDocumentSubmitBtn.addEventListener('click', function () {
+    const file = idDocumentInput.files && idDocumentInput.files[0];
+    if (!file) {
+      idDocumentResultMsg.textContent = 'ファイルを選択してください。';
+      idDocumentResultMsg.className = 'text-xs text-rose-500';
+      return;
+    }
+
+    idDocumentSubmitBtn.disabled = true;
+    idDocumentResultMsg.textContent = '';
+    idDocumentResultMsg.className = 'text-xs min-h-[1em]';
+
+    const formData = new FormData();
+    formData.append('idDocument', file);
+
+    fetch('/api/creator/submit-id', { method: 'POST', body: formData })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        idDocumentSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          idDocumentInput.value = '';
+          idDocumentResultMsg.textContent = '提出しました。運営の審査をお待ちください。';
+          idDocumentResultMsg.className = 'text-xs text-teal-600';
+          updateIdVerificationUI(data.idVerificationStatus, null);
+        } else if (data.error === 'unsupported_file_type') {
+          idDocumentResultMsg.textContent = '対応していないファイル形式です（画像またはPDF）。';
+          idDocumentResultMsg.className = 'text-xs text-rose-500';
+        } else if (data.error === 'file_too_large') {
+          idDocumentResultMsg.textContent = 'ファイルサイズが大きすぎます。';
+          idDocumentResultMsg.className = 'text-xs text-rose-500';
+        } else {
+          idDocumentResultMsg.textContent = '提出に失敗しました（' + (data.error || status) + '）';
+          idDocumentResultMsg.className = 'text-xs text-rose-500';
+        }
+      })
+      .catch(() => {
+        idDocumentSubmitBtn.disabled = false;
+        idDocumentResultMsg.textContent = '通信エラーが発生しました。';
+        idDocumentResultMsg.className = 'text-xs text-rose-500';
+      });
+  });
 
   function refreshPointsBox() {
     pointsBalanceText.textContent = formatNumber(currentBalance) + ' pt';
@@ -604,6 +698,7 @@
           currentBalanceYen = data.pointsBalanceYen || 0;
           currentRedemptions = data.redemptionRequests || [];
           refreshPointsBox();
+          updateIdVerificationUI(data.idVerificationStatus, data.idRejectionReason);
 
           if (typeof data.maxUploadsPerDay === 'number') {
             dailyUploadStatusText.textContent =

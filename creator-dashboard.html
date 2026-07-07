@@ -302,10 +302,10 @@
   function pointsStatusLabel(ps) {
     if (!ps) return null;
     if (ps.state === 'collecting') {
-      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧）', tone: 'bg-slate-100 text-slate-500' };
+      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt予定）', tone: 'bg-slate-100 text-slate-500' };
     }
     if (ps.state === 'eligible_pending_approval') {
-      return { text: '承認待ち（閲覧数クリア）', tone: 'bg-amber-50 text-amber-700' };
+      return { text: '承認待ち（+' + ps.amount + 'pt予定）', tone: 'bg-amber-50 text-amber-700' };
     }
     if (ps.state === 'awarded') {
       return { text: '付与済み（+' + ps.amount + 'pt）', tone: 'bg-teal-50 text-teal-700' };

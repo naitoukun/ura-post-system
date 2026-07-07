@@ -117,7 +117,7 @@
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">ポイント設定</h2>
-    <p class="text-xs text-slate-400 mt-1">クリエイターのアップロード1件あたりの付与ポイントと、24時間以内に必要な最低閲覧数です。</p>
+    <p class="text-xs text-slate-400 mt-1">動画・画像それぞれのアップロード1件あたりの付与ポイント（既定値）と、24時間以内に必要な最低閲覧数です。</p>
   </div>
 
   <div id="pointsStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
@@ -126,8 +126,13 @@
 
   <form id="pointsForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">アップロード1件あたりの付与ポイント</span>
-      <input type="number" name="pointsPerUpload" required min="1" step="1" placeholder="100"
+      <span class="text-sm font-medium text-slate-700">動画1件あたりの付与ポイント（既定値）</span>
+      <input type="number" name="pointsPerVideoUpload" required min="1" step="1" placeholder="100"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">画像ギャラリー1件あたりの付与ポイント（既定値）</span>
+      <input type="number" name="pointsPerImageUpload" required min="1" step="1" placeholder="100"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
     <label class="flex flex-col gap-1">
@@ -135,6 +140,7 @@
       <input type="number" name="pointsViewThreshold" required min="1" step="1" placeholder="10"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
+    <p class="text-xs text-slate-400">個別の子ごとに変えたい場合は、下の「女の子アカウント管理」の一覧から個別設定できます。</p>
     <button type="submit" id="pointsSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
       更新
     </button>
@@ -498,8 +504,9 @@
       .then((res) => res.json())
       .then((data) => {
         pointsStatusBox.textContent =
-          `付与ポイント: ${data.pointsPerUpload}pt / 24時間以内の最低閲覧数: ${data.pointsViewThreshold}`;
-        pointsForm.elements['pointsPerUpload'].value = data.pointsPerUpload;
+          `既定の付与ポイント: 動画${data.pointsPerVideoUpload}pt / 画像${data.pointsPerImageUpload}pt / 24時間以内の最低閲覧数: ${data.pointsViewThreshold}`;
+        pointsForm.elements['pointsPerVideoUpload'].value = data.pointsPerVideoUpload;
+        pointsForm.elements['pointsPerImageUpload'].value = data.pointsPerImageUpload;
         pointsForm.elements['pointsViewThreshold'].value = data.pointsViewThreshold;
       })
       .catch(() => {
@@ -519,7 +526,8 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pointsPerUpload: Number(formData.get('pointsPerUpload')),
+        pointsPerVideoUpload: Number(formData.get('pointsPerVideoUpload')),
+        pointsPerImageUpload: Number(formData.get('pointsPerImageUpload')),
         pointsViewThreshold: Number(formData.get('pointsViewThreshold')),
       }),
     })
@@ -678,6 +686,9 @@
     if (pendingCount) {
       addBadge('交換申請 ' + pendingCount + '件', 'bg-rose-50 text-rose-600');
     }
+    if (creator.pointsPerVideoUpload != null || creator.pointsPerImageUpload != null) {
+      addBadge('付与ポイント個別設定あり', 'bg-violet-50 text-violet-700');
+    }
 
     summary.appendChild(badgeRow);
     card.appendChild(summary);
@@ -732,6 +743,83 @@
     adjustWrap.appendChild(adjustBtn);
     body.appendChild(adjustWrap);
 
+    // 動画/画像それぞれの付与ポイントの個別上書き(空欄=既定値を使う)
+    const overrideHeading = document.createElement('p');
+    overrideHeading.className = 'text-[11px] font-bold text-slate-500 mt-1';
+    overrideHeading.textContent = '付与ポイントの個別設定（空欄で既定値を使用）';
+    body.appendChild(overrideHeading);
+
+    const overrideWrap = document.createElement('div');
+    overrideWrap.className = 'flex flex-col gap-2 border border-slate-100 rounded-lg p-3';
+
+    function buildOverrideField(labelText, currentValue) {
+      const label = document.createElement('label');
+      label.className = 'flex items-center justify-between gap-2 text-xs';
+      const span = document.createElement('span');
+      span.className = 'text-slate-500';
+      span.textContent = labelText;
+      label.appendChild(span);
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '1';
+      input.step = '1';
+      input.placeholder = '既定値を使用';
+      if (currentValue != null) input.value = currentValue;
+      input.className = 'w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+      label.appendChild(input);
+      overrideWrap.appendChild(label);
+      return input;
+    }
+
+    const videoOverrideInput = buildOverrideField('動画1件あたり', creator.pointsPerVideoUpload);
+    const imageOverrideInput = buildOverrideField('画像ギャラリー1件あたり', creator.pointsPerImageUpload);
+
+    const overrideMsg = document.createElement('p');
+    overrideMsg.className = 'text-xs min-h-[1em]';
+    overrideWrap.appendChild(overrideMsg);
+
+    const overrideApplyBtn = document.createElement('button');
+    overrideApplyBtn.type = 'button';
+    overrideApplyBtn.textContent = '適用';
+    overrideApplyBtn.className = 'self-start border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+    overrideApplyBtn.addEventListener('click', () => {
+      overrideMsg.textContent = '';
+      overrideMsg.className = 'text-xs min-h-[1em]';
+      overrideApplyBtn.disabled = true;
+
+      const videoValue = videoOverrideInput.value.trim();
+      const imageValue = imageOverrideInput.value.trim();
+
+      fetch('/api/creators/set-points-override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creatorId: creator.id,
+          pointsPerVideoUpload: videoValue === '' ? null : Number(videoValue),
+          pointsPerImageUpload: imageValue === '' ? null : Number(imageValue),
+        }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          overrideApplyBtn.disabled = false;
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+            refreshVideoList();
+          } else {
+            overrideMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+            overrideMsg.classList.add('text-rose-500');
+          }
+        })
+        .catch(() => {
+          overrideApplyBtn.disabled = false;
+          overrideMsg.textContent = '通信エラーが発生しました。';
+          overrideMsg.classList.add('text-rose-500');
+        });
+    });
+    overrideWrap.appendChild(overrideApplyBtn);
+    body.appendChild(overrideWrap);
+
     // 交換申請一覧
     const requests = creator.redemptionRequests || [];
     if (requests.length) {
@@ -763,6 +851,40 @@
         body.appendChild(row);
       });
     }
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = 'アカウント削除';
+    deleteBtn.className = 'self-start text-xs font-medium text-rose-500 hover:text-rose-600 mt-1';
+    deleteBtn.addEventListener('click', () => {
+      if (!window.confirm(
+        (creator.displayName || '（名前未設定）') + ' さんのアカウントを削除しますか？\n'
+        + 'このアカウントが投稿した動画・画像もすべて削除され、共有リンクも無効になります。この操作は取り消せません。'
+      )) return;
+
+      deleteBtn.disabled = true;
+      fetch('/api/creators/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+            refreshVideoList();
+          } else {
+            deleteBtn.disabled = false;
+            alert('削除に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          deleteBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    body.appendChild(deleteBtn);
 
     card.appendChild(body);
     return card;
@@ -934,9 +1056,9 @@
     const ps = video.pointsStatus;
     if (ps) {
       if (ps.state === 'collecting') {
-        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧）', 'bg-slate-100 text-slate-500');
+        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt予定）', 'bg-slate-100 text-slate-500');
       } else if (ps.state === 'eligible_pending_approval') {
-        addBadge('ポイント承認待ち', 'bg-rose-50 text-rose-600');
+        addBadge('ポイント承認待ち（+' + ps.amount + 'pt予定）', 'bg-rose-50 text-rose-600');
       } else if (ps.state === 'awarded') {
         addBadge('ポイント付与済み（+' + ps.amount + 'pt）', 'bg-teal-50 text-teal-700');
       } else if (ps.state === 'not_eligible') {
@@ -1002,7 +1124,7 @@
     if (ps && ps.state === 'eligible_pending_approval') {
       const approveBtn = document.createElement('button');
       approveBtn.type = 'button';
-      approveBtn.textContent = '承認してポイント付与';
+      approveBtn.textContent = '承認して+' + ps.amount + 'pt付与';
       approveBtn.className = 'border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
       approveBtn.addEventListener('click', () => {
         approveBtn.disabled = true;

@@ -30,7 +30,7 @@
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-ads     既定（動画に個別設定が無い場合用）の広告A/Bと表示比率の更新（JSON）※要ログイン
-- POST /api/set-points  クリエイターへのポイント付与ルール（アップロード1件の付与量・24時間以内の最低閲覧数）の更新（JSON）※要ログイン
+- POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
 - POST /api/reset-og-image  OGP画像を同梱の既定画像に戻す（JSON）※要ログイン
 
@@ -50,6 +50,8 @@
 - POST /api/creators/approve-points  投稿1件を承認しポイント付与（サーバー側で状態を再検証）※要ログイン(管理者)
 - POST /api/creators/adjust-points  ポイント残高の手動調整（返金・是正用）※要ログイン(管理者)
 - POST /api/creators/fulfill-redemption  ギフト券交換申請を対応済みにする（JSON）※要ログイン(管理者)
+- POST /api/creators/set-points-override  クリエイターごとの動画/画像付与ポイントの個別上書き（null=サイト既定値を使用）（JSON）※要ログイン(管理者)
+- POST /api/creators/delete  クリエイターアカウントの削除（投稿済みの全コンテンツも連鎖削除）（JSON）※要ログイン(管理者)
 
 ※「要ログイン」の操作は、/api/login で発行されたセッションCookieが無いと401になる。
 ※「要クリエイターログイン」の操作は、/api/creator/login等で発行された別のセッションCookieが無いと401になる。
@@ -161,9 +163,12 @@ MIN_CREATOR_PASSWORD_LENGTH = 8
 LOGIN_CODE_RE = re.compile(r"^[A-F0-9]{8}$")
 
 # アップロードから24時間以内に、この閲覧数を超えないとポイント付与対象にならない。
-# 固定ポイント自体も含め、サイト全体の既定値。管理画面(ポイント設定)で変更可能。
+# 付与ポイントは動画/画像で別々に設定でき、さらにクリエイターごとに個別上書きもできる
+# (creators.json側にpoints_per_video_upload/points_per_image_uploadがあればそちらを優先)。
+# ここにあるのはそのどちらも無い場合の、サイト全体の既定値。管理画面(ポイント設定)で変更可能。
 POINTS_WINDOW_SECONDS = 24 * 60 * 60
-DEFAULT_POINTS_PER_UPLOAD = 100
+DEFAULT_POINTS_PER_VIDEO_UPLOAD = 100
+DEFAULT_POINTS_PER_IMAGE_UPLOAD = 100
 DEFAULT_POINTS_VIEW_THRESHOLD = 10
 
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
@@ -209,7 +214,20 @@ def verify_password(password, salt_hex, expected_hash_hex):
     return hmac.compare_digest(computed_hash_hex, expected_hash_hex)
 
 
-def get_points_status(video, config):
+def get_effective_points_amount(video, creator, config):
+    """このコンテンツ(動画/画像)を承認した場合に付与されるポイント数を返す。
+
+    クリエイター側に動画/画像それぞれの個別上書き設定があればそれを、
+    無ければサイト全体の既定値(config)を使う。
+    """
+    if video.get("content_type") == "image":
+        override = creator.get("points_per_image_upload") if creator else None
+        return override if override is not None else config.get("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD)
+    override = creator.get("points_per_video_upload") if creator else None
+    return override if override is not None else config.get("points_per_video_upload", DEFAULT_POINTS_PER_VIDEO_UPLOAD)
+
+
+def get_points_status(video, creator, config):
     """クリエイター投稿1件の、ポイント付与に関する現在の状態を返す。
 
     管理者自身のアップロード(owner_creator_id無し)には適用されないのでNoneを返す。
@@ -224,11 +242,12 @@ def get_points_status(video, config):
     window_end = video.get("uploaded_at_epoch", 0) + POINTS_WINDOW_SECONDS
     view_count = video.get("view_count", 0)
     threshold = config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
+    amount = get_effective_points_amount(video, creator, config)
 
     if time.time() < window_end:
-        return {"state": "collecting", "viewCount": view_count, "threshold": threshold, "windowEndsAt": window_end}
+        return {"state": "collecting", "viewCount": view_count, "threshold": threshold, "windowEndsAt": window_end, "amount": amount}
     if view_count >= threshold:
-        return {"state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold}
+        return {"state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold, "amount": amount}
     return {"state": "not_eligible", "viewCount": view_count, "threshold": threshold}
 
 
@@ -239,7 +258,8 @@ def load_config():
             "premium_button_text": DEFAULT_PREMIUM_BUTTON_TEXT,
             "ads": json.loads(json.dumps(DEFAULT_ADS)),
             "og_image_filename": None,
-            "points_per_upload": DEFAULT_POINTS_PER_UPLOAD,
+            "points_per_video_upload": DEFAULT_POINTS_PER_VIDEO_UPLOAD,
+            "points_per_image_upload": DEFAULT_POINTS_PER_IMAGE_UPLOAD,
             "points_view_threshold": DEFAULT_POINTS_VIEW_THRESHOLD,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -248,7 +268,8 @@ def load_config():
     config.setdefault("premium_button_text", DEFAULT_PREMIUM_BUTTON_TEXT)
     config.setdefault("ads", json.loads(json.dumps(DEFAULT_ADS)))
     config.setdefault("og_image_filename", None)
-    config.setdefault("points_per_upload", DEFAULT_POINTS_PER_UPLOAD)
+    config.setdefault("points_per_video_upload", DEFAULT_POINTS_PER_VIDEO_UPLOAD)
+    config.setdefault("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD)
     config.setdefault("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
     return config
 
@@ -699,7 +720,8 @@ class Handler(BaseHTTPRequestHandler):
             "premiumButtonText": config["premium_button_text"],
             "ads": [serialize_ad(ad) for ad in config["ads"]],
             "hasCustomOgImage": bool(config.get("og_image_filename")),
-            "pointsPerUpload": config.get("points_per_upload", DEFAULT_POINTS_PER_UPLOAD),
+            "pointsPerVideoUpload": config.get("points_per_video_upload", DEFAULT_POINTS_PER_VIDEO_UPLOAD),
+            "pointsPerImageUpload": config.get("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD),
             "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
         }).encode("utf-8")
         self.send_response(200)
@@ -731,7 +753,7 @@ class Handler(BaseHTTPRequestHandler):
                     (find_creator(creators, v["owner_creator_id"]) or {}).get("display_name")
                     if v.get("owner_creator_id") else None
                 ),
-                "pointsStatus": get_points_status(v, config),
+                "pointsStatus": get_points_status(v, find_creator(creators, v.get("owner_creator_id")), config),
             }
             for v in videos
         ]
@@ -1078,6 +1100,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_fulfill_redemption()
+        elif path == "/api/creators/set-points-override":
+            if self.require_auth():
+                return
+            self.handle_creators_set_points_override()
+        elif path == "/api/creators/delete":
+            if self.require_auth():
+                return
+            self.handle_creators_delete()
         else:
             self.send_error(404, "Not Found")
 
@@ -1189,24 +1219,31 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        points_per_upload = data.get("pointsPerUpload")
+        points_per_video_upload = data.get("pointsPerVideoUpload")
+        points_per_image_upload = data.get("pointsPerImageUpload")
         points_view_threshold = data.get("pointsViewThreshold")
 
         def is_positive_int(value):
             return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
-        if not is_positive_int(points_per_upload) or not is_positive_int(points_view_threshold):
+        if (
+            not is_positive_int(points_per_video_upload)
+            or not is_positive_int(points_per_image_upload)
+            or not is_positive_int(points_view_threshold)
+        ):
             self.respond_json(400, {"ok": False, "error": "invalid_points_config"})
             return
 
         config = load_config()
-        config["points_per_upload"] = points_per_upload
+        config["points_per_video_upload"] = points_per_video_upload
+        config["points_per_image_upload"] = points_per_image_upload
         config["points_view_threshold"] = points_view_threshold
         save_config(config)
 
         self.respond_json(200, {
             "ok": True,
-            "pointsPerUpload": points_per_upload,
+            "pointsPerVideoUpload": points_per_video_upload,
+            "pointsPerImageUpload": points_per_image_upload,
             "pointsViewThreshold": points_view_threshold,
         })
 
@@ -1756,6 +1793,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_list_creator_content(self):
         creator_id = self.get_creator_id()
         config = load_config()
+        creator = find_creator(load_creators(), creator_id)
         videos = sorted(load_videos(), key=lambda v: v["uploaded_at"], reverse=True)
         own_videos = [v for v in videos if v.get("owner_creator_id") == creator_id]
         body = [
@@ -1767,7 +1805,7 @@ class Handler(BaseHTTPRequestHandler):
                 "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
                 "timeLimit": get_time_limit_status(v),
                 "viewCount": v.get("view_count", 0),
-                "pointsStatus": get_points_status(v, config),
+                "pointsStatus": get_points_status(v, creator, config),
             }
             for v in own_videos
         ]
@@ -1843,6 +1881,8 @@ class Handler(BaseHTTPRequestHandler):
                 "redemptionRequests": [serialize_redemption_request(r) for r in c.get("redemption_requests", [])],
                 "invitedAt": c.get("invited_at"),
                 "activatedAt": c.get("activated_at"),
+                "pointsPerVideoUpload": c.get("points_per_video_upload"),
+                "pointsPerImageUpload": c.get("points_per_image_upload"),
             }
             for c in sorted(creators, key=lambda c: c.get("invited_at", ""), reverse=True)
         ]
@@ -1878,6 +1918,8 @@ class Handler(BaseHTTPRequestHandler):
                 "redemption_requests": [],
                 "invited_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "activated_at": None,
+                "points_per_video_upload": None,
+                "points_per_image_upload": None,
             }
             creators.append(creator)
             save_creators(creators)
@@ -1911,19 +1953,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(404, {"ok": False, "error": "not_found"})
                 return
 
-            # クライアント側の表示だけを信用せず、サーバー側で承認可能な状態か再検証する
-            status = get_points_status(video, config)
-            if not status or status["state"] != "eligible_pending_approval":
-                self.respond_json(400, {"ok": False, "error": "not_eligible"})
-                return
-
-            amount = config.get("points_per_upload", DEFAULT_POINTS_PER_UPLOAD)
-
             creators = load_creators()
             creator = find_creator(creators, video.get("owner_creator_id"))
             if not creator:
                 self.respond_json(404, {"ok": False, "error": "creator_not_found"})
                 return
+
+            # クライアント側の表示だけを信用せず、サーバー側で承認可能な状態か再検証する
+            status = get_points_status(video, creator, config)
+            if not status or status["state"] != "eligible_pending_approval":
+                self.respond_json(400, {"ok": False, "error": "not_eligible"})
+                return
+
+            amount = get_effective_points_amount(video, creator, config)
 
             creator["points_balance"] = creator.get("points_balance", 0) + amount
             creator.setdefault("points_history", []).append({
@@ -2009,6 +2051,77 @@ class Handler(BaseHTTPRequestHandler):
             request["status"] = "fulfilled"
             request["fulfilled_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             save_creators(creators)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_creators_set_points_override(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+        video_override = data.get("pointsPerVideoUpload")
+        image_override = data.get("pointsPerImageUpload")
+
+        def valid_override(value):
+            # null(未指定) = サイト既定値を使う、という意味なので許可する
+            return value is None or (isinstance(value, int) and not isinstance(value, bool) and value > 0)
+
+        if not valid_override(video_override) or not valid_override(image_override):
+            self.respond_json(400, {"ok": False, "error": "invalid_points_override"})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["points_per_video_upload"] = video_override
+            creator["points_per_image_upload"] = image_override
+            save_creators(creators)
+
+        self.respond_json(200, {
+            "ok": True,
+            "pointsPerVideoUpload": video_override,
+            "pointsPerImageUpload": image_override,
+        })
+
+    def handle_creators_delete(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            if not find_creator(creators, creator_id):
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            # アカウント削除時は、そのクリエイターが投稿した全コンテンツ(共有リンク含む)も一緒に削除する
+            owned_videos = [v for v in load_videos() if v.get("owner_creator_id") == creator_id]
+            for video in owned_videos:
+                self._delete_video_entry(video["id"], video)
+
+            remaining_creators = [c for c in creators if c["id"] != creator_id]
+            save_creators(remaining_creators)
 
         self.respond_json(200, {"ok": True})
 

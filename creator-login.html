@@ -93,7 +93,12 @@
           location.href = '/creator';
         } else {
           submitBtn.disabled = false;
-          resultMsg.textContent = 'ログインコードまたはパスワードが正しくありません。';
+          if (data.error === 'too_many_attempts') {
+            const minutes = Math.ceil((data.retryAfterSeconds || 0) / 60);
+            resultMsg.textContent = '試行回数が多すぎます。' + minutes + '分後に再試行してください。';
+          } else {
+            resultMsg.textContent = 'ログインコードまたはパスワードが正しくありません。';
+          }
         }
       })
       .catch(() => {

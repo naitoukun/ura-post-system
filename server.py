@@ -115,6 +115,75 @@ SESSION_DURATION_SECONDS = 4 * 60 * 60  # 4時間
 # （サーバー再起動でログイン状態はリセットされる）。
 SESSIONS = {}
 
+# ログイン試行のブルートフォース対策。管理者ログイン(/api/login)とクリエイターログイン
+# (/api/creator/login)の両方に共通で使う、IPアドレス単位のシンプルな回数制限。
+# scope("admin"/"creator")ごとに別カウントにする(管理者への攻撃でクリエイターまで
+# ロックされる、といった巻き添えを防ぐため)。
+LOGIN_ATTEMPTS_LOCK = threading.Lock()
+LOGIN_ATTEMPTS = {}  # (scope, ip) -> {"count": int, "window_started_at": float, "locked_until": float|None}
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+
+
+def get_client_ip(handler):
+    """Nginxリバースプロキシ経由の実クライアントIPを取得する。
+
+    アプリはファイアウォールでポート8000への直接外部アクセスを塞いでいるため、
+    ここに届くリクエストは必ずNginx経由であり、X-Real-IP/X-Forwarded-Forは
+    Nginx自身が上書き設定した信頼できる値になる。
+    """
+    real_ip = handler.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    forwarded = handler.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return handler.client_address[0]
+
+
+def _prune_expired_login_attempts(now):
+    expired_keys = [
+        key for key, entry in LOGIN_ATTEMPTS.items()
+        if not entry.get("locked_until") and now - entry["window_started_at"] > LOGIN_FAILURE_WINDOW_SECONDS
+    ]
+    for key in expired_keys:
+        del LOGIN_ATTEMPTS[key]
+
+
+def is_login_locked_out(scope, ip):
+    """ロック中なら (True, 残り秒数) を、そうでなければ (False, 0) を返す。"""
+    key = (scope, ip)
+    now = time.time()
+    with LOGIN_ATTEMPTS_LOCK:
+        entry = LOGIN_ATTEMPTS.get(key)
+        if not entry or not entry.get("locked_until"):
+            return False, 0
+        if entry["locked_until"] <= now:
+            del LOGIN_ATTEMPTS[key]
+            return False, 0
+        return True, int(entry["locked_until"] - now)
+
+
+def record_login_failure(scope, ip):
+    key = (scope, ip)
+    now = time.time()
+    with LOGIN_ATTEMPTS_LOCK:
+        entry = LOGIN_ATTEMPTS.get(key)
+        if not entry or now - entry["window_started_at"] > LOGIN_FAILURE_WINDOW_SECONDS:
+            entry = {"count": 0, "window_started_at": now, "locked_until": None}
+        entry["count"] += 1
+        if entry["count"] >= MAX_LOGIN_ATTEMPTS:
+            entry["locked_until"] = now + LOGIN_LOCKOUT_SECONDS
+        LOGIN_ATTEMPTS[key] = entry
+        _prune_expired_login_attempts(now)
+
+
+def record_login_success(scope, ip):
+    key = (scope, ip)
+    with LOGIN_ATTEMPTS_LOCK:
+        LOGIN_ATTEMPTS.pop(key, None)
+
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
 ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 
@@ -1475,6 +1544,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def handle_login(self):
+        client_ip = get_client_ip(self)
+        locked, retry_after = is_login_locked_out("admin", client_ip)
+        if locked:
+            self.respond_json(429, {"ok": False, "error": "too_many_attempts", "retryAfterSeconds": retry_after})
+            return
+
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length <= 0 or content_length > 2_000:
             self.respond_json(400, {"ok": False, "error": "invalid_request"})
@@ -1492,9 +1567,11 @@ class Handler(BaseHTTPRequestHandler):
         # パスフレーズ・コードのどちらが間違っていたかは区別せず返す
         # （攻撃者にどちらが正しいか手がかりを与えないため）
         if not (passphrase_ok and code_ok):
+            record_login_failure("admin", client_ip)
             self.respond_json(401, {"ok": False, "error": "invalid_credentials"})
             return
 
+        record_login_success("admin", client_ip)
         token = self.create_session()
         self.send_response(200)
         self.set_session_cookie(token)
@@ -2338,6 +2415,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def handle_creator_login(self):
+        client_ip = get_client_ip(self)
+        locked, retry_after = is_login_locked_out("creator", client_ip)
+        if locked:
+            self.respond_json(429, {"ok": False, "error": "too_many_attempts", "retryAfterSeconds": retry_after})
+            return
+
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length <= 0 or content_length > 2_000:
             self.respond_json(400, {"ok": False, "error": "invalid_request"})
@@ -2356,9 +2439,11 @@ class Handler(BaseHTTPRequestHandler):
         creator = find_creator_by_login_code(creators, login_code)
         # ログインコード・パスワードのどちらが間違っていたかは区別せず返す
         if not creator or not verify_password(password, creator.get("password_salt"), creator.get("password_hash")):
+            record_login_failure("creator", client_ip)
             self.respond_json(401, {"ok": False, "error": "invalid_credentials"})
             return
 
+        record_login_success("creator", client_ip)
         token = self.create_creator_session(creator["id"])
         self.send_response(200)
         self.set_creator_session_cookie(token)

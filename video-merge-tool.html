@@ -64,6 +64,14 @@
     font-size:12px;
   }
   .file-row:last-child{ border-bottom:none; }
+  .file-thumb{
+    width:44px;
+    height:44px;
+    flex-shrink:0;
+    border-radius:6px;
+    background:#f0e9dd;
+    object-fit:cover;
+  }
   .file-name{
     flex:1;
     min-width:0;
@@ -190,11 +198,51 @@
     renderFileList();
   });
 
+  const thumbCache = new WeakMap();
+
+  function captureThumbnail(file, imgEl) {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    const objectUrl = URL.createObjectURL(file);
+    video.src = objectUrl;
+
+    const cleanup = () => URL.revokeObjectURL(objectUrl);
+
+    video.addEventListener('loadeddata', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 88;
+      canvas.height = 88;
+      const ctx = canvas.getContext('2d');
+      const scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+      const w = video.videoWidth * scale;
+      const h = video.videoHeight * scale;
+      ctx.drawImage(video, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      thumbCache.set(file, dataUrl);
+      imgEl.src = dataUrl;
+      cleanup();
+    }, { once: true });
+
+    video.addEventListener('error', cleanup, { once: true });
+  }
+
   function renderFileList() {
     fileListEl.innerHTML = '';
     files.forEach((file, index) => {
       const row = document.createElement('div');
       row.className = 'file-row';
+
+      const thumb = document.createElement('img');
+      thumb.className = 'file-thumb';
+      thumb.alt = '';
+      row.appendChild(thumb);
+      if (thumbCache.has(file)) {
+        thumb.src = thumbCache.get(file);
+      } else {
+        captureThumbnail(file, thumb);
+      }
 
       const name = document.createElement('span');
       name.className = 'file-name';

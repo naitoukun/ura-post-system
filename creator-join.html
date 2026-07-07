@@ -60,6 +60,14 @@
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       </label>
 
+      <label class="flex items-start gap-2">
+        <input type="checkbox" name="agreedToTerms" required class="w-4 h-4 mt-0.5" />
+        <span class="text-xs text-slate-600">
+          <a href="/creator-terms" target="_blank" rel="noopener noreferrer" class="text-teal-600 underline">クリエイター利用規約</a>
+          に同意します
+        </span>
+      </label>
+
       <button type="submit" id="registerSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
         登録する
       </button>
@@ -107,9 +115,14 @@
     const formData = new FormData(registerForm);
     const password = formData.get('password');
     const passwordConfirm = formData.get('passwordConfirm');
+    const agreedToTerms = formData.get('agreedToTerms') === 'on';
 
     if (password !== passwordConfirm) {
       resultMsg.textContent = 'パスワードが一致しません。';
+      return;
+    }
+    if (!agreedToTerms) {
+      resultMsg.textContent = 'クリエイター利用規約への同意が必要です。';
       return;
     }
 
@@ -118,7 +131,7 @@
     fetch('/api/creator/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inviteToken: state.token, password: password }),
+      body: JSON.stringify({ inviteToken: state.token, password: password, agreedToTerms: agreedToTerms }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
       .then(({ status, data }) => {

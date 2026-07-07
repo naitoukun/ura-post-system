@@ -10,6 +10,7 @@
 - GET  /terms           利用規約
 - GET  /disclaimer      免責事項
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
+- GET  /creator-terms    クリエイター向け利用規約（登録時に同意が必須）
 - GET  /og-image        SNSシェア時のOGP/Twitterカード用サイト共通画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
 - GET  /thumb/<id>      動画ごとに設定した個別サムネイル（未設定ならそもそも参照されない）
 - GET  /stats/<token>   クリエイター向けの視聴データページ（ログイン不要。共有リンクとは別トークン）
@@ -861,6 +862,8 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "disclaimer.html"), "text/html; charset=utf-8")
         elif path == "/copyright-policy":
             self.serve_file(os.path.join(BASE_DIR, "copyright-policy.html"), "text/html; charset=utf-8")
+        elif path == "/creator-terms":
+            self.serve_file(os.path.join(BASE_DIR, "creator-terms.html"), "text/html; charset=utf-8")
         elif path == "/og-image":
             self.handle_serve_og_image()
         elif path.startswith("/thumb/"):
@@ -1940,6 +1943,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(password) < MIN_CREATOR_PASSWORD_LENGTH:
             self.respond_json(400, {"ok": False, "error": "password_too_short"})
             return
+        if data.get("agreedToTerms") is not True:
+            self.respond_json(400, {"ok": False, "error": "terms_not_agreed"})
+            return
 
         with CREATORS_LOCK:
             creators = load_creators()
@@ -1953,6 +1959,7 @@ class Handler(BaseHTTPRequestHandler):
             creator["password_hash"] = hash_hex
             creator["status"] = "active"
             creator["activated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            creator["terms_agreed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             save_creators(creators)
             login_code = creator["login_code"]
             creator_id = creator["id"]

@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>クリエイターダッシュボード | ura-post.com</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#14b8a6;
+    --accent-teal-dark:#0d9488;
+  }
+  html,body{
+    background:#f4f7fa;
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #e7edf3;
+    box-shadow:0 4px 20px rgba(15,45,60,0.06);
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 6px 16px rgba(20,184,166,0.35);
+    transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+  }
+  .btn-primary:active{ transform:scale(0.98); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
+  .progress-bar-inner{
+    transition:width 0.15s linear;
+    background:linear-gradient(90deg,var(--accent-teal),var(--accent-teal-dark));
+  }
+  .points-count{
+    font-family:'Outfit','Noto Sans JP',sans-serif;
+  }
+</style>
+</head>
+<body class="min-h-screen w-full flex items-center justify-center p-4">
+
+<div class="w-full max-w-md mx-auto flex flex-col gap-5 py-8">
+
+  <div class="flex items-start justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-bold text-slate-800">クリエイターダッシュボード</h1>
+      <p class="text-xs text-slate-400 mt-1">あなたがアップロードしたコンテンツの管理・ポイント確認ができます。</p>
+    </div>
+    <button id="logoutBtn" type="button" class="shrink-0 text-xs font-medium text-slate-400 hover:text-slate-600 underline">
+      ログアウト
+    </button>
+  </div>
+
+  <div class="card rounded-2xl p-4 flex flex-col gap-1">
+    <span class="text-xs text-slate-400">現在のポイント残高</span>
+    <span id="pointsBalanceText" class="points-count text-3xl font-extrabold text-teal-600">-</span>
+  </div>
+
+  <form id="redemptionForm" class="card rounded-2xl p-4 flex flex-col gap-3">
+    <span class="text-sm font-medium text-slate-700">Amazonギフト券への交換申請</span>
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-slate-500">申請するポイント数</span>
+      <input type="number" name="points" min="1" step="1" required placeholder="例: 500"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <button type="submit" id="redemptionSubmitBtn" class="btn-primary rounded-lg py-2.5 text-sm font-bold">
+      交換を申請する
+    </button>
+    <p id="redemptionResultMsg" class="text-sm min-h-[1em]"></p>
+    <div id="redemptionHistoryBox" class="flex flex-col gap-1"></div>
+  </form>
+
+  <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <div class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">コンテンツの種類</span>
+      <div class="flex gap-4">
+        <label class="flex items-center gap-1.5 text-sm text-slate-700">
+          <input type="radio" name="contentType" value="video" checked class="w-4 h-4" />
+          動画
+        </label>
+        <label class="flex items-center gap-1.5 text-sm text-slate-700">
+          <input type="radio" name="contentType" value="image" class="w-4 h-4" />
+          画像（複数選択可・ギャラリー）
+        </label>
+      </div>
+    </div>
+
+    <label class="flex flex-col gap-1">
+      <span id="fileFieldLabel" class="text-sm font-medium text-slate-700">動画ファイル（mp4 / webm / mov / m4v）</span>
+      <input id="fileInput" type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
+        class="text-sm" />
+    </label>
+
+    <label class="flex items-center gap-2">
+      <input type="checkbox" name="timeLimitEnabled" class="w-4 h-4" />
+      <span class="text-sm text-slate-700">初回アクセスから24時間限定にする</span>
+    </label>
+
+    <button type="submit" id="submitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      アップロード（新規URLを発行）
+    </button>
+
+    <div id="progressWrap" class="hidden flex flex-col gap-1">
+      <div class="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+        <div id="progressBar" class="progress-bar-inner h-full" style="width:0%"></div>
+      </div>
+      <span id="progressText" class="text-xs text-slate-400">0%</span>
+    </div>
+
+    <div id="resultMsg" class="text-sm"></div>
+  </form>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">アップロード済みコンテンツ</h2>
+    <p class="text-xs text-slate-400 mt-1">アップロードは即座に公開されます。ポイント付与には運営の承認が必要です。</p>
+  </div>
+
+  <div id="contentListBox" class="flex flex-col gap-3">
+    <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  const uploadForm  = document.getElementById('uploadForm');
+  const fileInputEl = document.getElementById('fileInput');
+  const fileFieldLabel = document.getElementById('fileFieldLabel');
+  const progressWrap= document.getElementById('progressWrap');
+  const progressBar = document.getElementById('progressBar');
+  const progressText= document.getElementById('progressText');
+  const resultMsg   = document.getElementById('resultMsg');
+  const contentListBox = document.getElementById('contentListBox');
+  const logoutBtn   = document.getElementById('logoutBtn');
+  const pointsBalanceText = document.getElementById('pointsBalanceText');
+
+  const redemptionForm = document.getElementById('redemptionForm');
+  const redemptionSubmitBtn = document.getElementById('redemptionSubmitBtn');
+  const redemptionResultMsg = document.getElementById('redemptionResultMsg');
+  const redemptionHistoryBox = document.getElementById('redemptionHistoryBox');
+
+  let currentBalance = 0;
+  let currentRedemptions = [];
+
+  function redirectIfUnauthenticated(status) {
+    if (status === 401) {
+      location.href = '/creator';
+      return true;
+    }
+    return false;
+  }
+
+  logoutBtn.addEventListener('click', function () {
+    fetch('/api/creator/logout', { method: 'POST' }).finally(() => {
+      location.href = '/creator';
+    });
+  });
+
+  document.querySelectorAll('input[name="contentType"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (radio.value === 'image' && radio.checked) {
+        fileInputEl.name = 'images';
+        fileInputEl.multiple = true;
+        fileInputEl.accept = 'image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif';
+        fileFieldLabel.textContent = '画像ファイル（jpg / png / webp / gif・複数選択可）';
+      } else if (radio.value === 'video' && radio.checked) {
+        fileInputEl.name = 'video';
+        fileInputEl.multiple = false;
+        fileInputEl.accept = 'video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v';
+        fileFieldLabel.textContent = '動画ファイル（mp4 / webm / mov / m4v）';
+      }
+    });
+  });
+
+  uploadForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    resultMsg.textContent = '';
+    resultMsg.className = 'text-sm';
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    progressWrap.classList.remove('hidden');
+    progressBar.style.width = '0%';
+    progressText.textContent = '0%';
+
+    const formData = new FormData(uploadForm);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/creator/upload');
+    xhr.upload.addEventListener('progress', (evt) => {
+      if (evt.lengthComputable) {
+        const pct = Math.round((evt.loaded / evt.total) * 100);
+        progressBar.style.width = pct + '%';
+        progressText.textContent = pct + '%';
+      }
+    });
+    xhr.onload = function () {
+      submitBtn.disabled = false;
+      progressWrap.classList.add('hidden');
+
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (e) {}
+
+      if (redirectIfUnauthenticated(xhr.status)) return;
+
+      if (xhr.status === 200 && data.ok) {
+        resultMsg.textContent = 'アップロード完了: ' + data.originalFilename;
+        resultMsg.classList.add('text-teal-600');
+        uploadForm.reset();
+        const checkedRadio = uploadForm.querySelector('input[name="contentType"]:checked');
+        if (checkedRadio) checkedRadio.dispatchEvent(new Event('change'));
+        refreshContentList();
+      } else {
+        resultMsg.textContent = 'アップロードに失敗しました（' + (data.error || xhr.status) + '）';
+        resultMsg.classList.add('text-rose-500');
+      }
+    };
+    xhr.onerror = function () {
+      submitBtn.disabled = false;
+      progressWrap.classList.add('hidden');
+      resultMsg.textContent = '通信エラーが発生しました。';
+      resultMsg.classList.add('text-rose-500');
+    };
+    xhr.send(formData);
+  });
+
+  function refreshPointsBox() {
+    pointsBalanceText.textContent = currentBalance + ' pt';
+
+    redemptionHistoryBox.innerHTML = '';
+    if (!currentRedemptions.length) return;
+
+    const heading = document.createElement('p');
+    heading.className = 'text-[11px] text-slate-400 mt-1';
+    heading.textContent = '交換申請履歴';
+    redemptionHistoryBox.appendChild(heading);
+
+    currentRedemptions
+      .slice()
+      .reverse()
+      .forEach((req) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between text-xs border-t border-slate-100 py-1.5';
+
+        const label = document.createElement('span');
+        label.className = 'text-slate-600';
+        label.textContent = req.points + 'pt（' + req.requestedAt + '）';
+        row.appendChild(label);
+
+        const status = document.createElement('span');
+        status.textContent = req.status === 'fulfilled' ? '対応済み' : '申請中';
+        status.className = 'px-2 py-0.5 rounded-full text-[11px] ' +
+          (req.status === 'fulfilled' ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700');
+        row.appendChild(status);
+
+        redemptionHistoryBox.appendChild(row);
+      });
+  }
+
+  redemptionForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    redemptionResultMsg.textContent = '';
+    redemptionResultMsg.className = 'text-sm min-h-[1em]';
+    redemptionSubmitBtn.disabled = true;
+
+    const points = parseInt(new FormData(redemptionForm).get('points'), 10);
+
+    fetch('/api/creator/request-redemption', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: points }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        redemptionSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          redemptionResultMsg.textContent = '申請しました。運営からの対応をお待ちください。';
+          redemptionResultMsg.classList.add('text-teal-600');
+          redemptionForm.reset();
+          refreshCreatorInfo();
+        } else {
+          redemptionResultMsg.textContent = '申請に失敗しました（' + (data.error || status) + '）';
+          redemptionResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        redemptionSubmitBtn.disabled = false;
+        redemptionResultMsg.textContent = '通信エラーが発生しました。';
+        redemptionResultMsg.classList.add('text-rose-500');
+      });
+  });
+
+  function refreshCreatorInfo() {
+    // 自分の残高・交換履歴は /api/creator/content のポイント情報とは別に、
+    // 交換申請APIのレスポンスとcontentList読み込み後の状態から都度組み立てる代わりに、
+    // ここではコンテンツ一覧取得時に合わせて再取得する簡易実装にする。
+    refreshContentList();
+  }
+
+  function pointsStatusLabel(ps) {
+    if (!ps) return null;
+    if (ps.state === 'collecting') {
+      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧）', tone: 'bg-slate-100 text-slate-500' };
+    }
+    if (ps.state === 'eligible_pending_approval') {
+      return { text: '承認待ち（閲覧数クリア）', tone: 'bg-amber-50 text-amber-700' };
+    }
+    if (ps.state === 'awarded') {
+      return { text: '付与済み（+' + ps.amount + 'pt）', tone: 'bg-teal-50 text-teal-700' };
+    }
+    if (ps.state === 'not_eligible') {
+      return { text: '対象外（閲覧数未達）', tone: 'bg-slate-100 text-slate-400' };
+    }
+    return null;
+  }
+
+  function buildContentCard(item) {
+    const shareUrl = location.origin + '/?v=' + encodeURIComponent(item.id);
+
+    const card = document.createElement('details');
+    card.className = 'card rounded-2xl overflow-hidden';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none p-4 flex flex-col gap-1';
+
+    const title = document.createElement('p');
+    title.className = 'text-sm font-medium text-slate-700 break-all';
+    title.textContent = item.originalFilename;
+    summary.appendChild(title);
+
+    const meta = document.createElement('p');
+    meta.className = 'text-xs text-slate-400';
+    meta.textContent = 'アップロード日時: ' + item.uploadedAt;
+    summary.appendChild(meta);
+
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'flex flex-wrap gap-1 mt-1';
+
+    function addBadge(text, tone) {
+      const badge = document.createElement('span');
+      badge.textContent = text;
+      badge.className = 'text-[11px] px-2 py-0.5 rounded-full ' + tone;
+      badgeRow.appendChild(badge);
+    }
+
+    if (item.contentType === 'image') {
+      addBadge('画像ギャラリー（' + (item.imageCount || 0) + '枚）', 'bg-violet-50 text-violet-700');
+    }
+    addBadge('視聴回数: ' + (item.viewCount || 0), 'bg-slate-100 text-slate-500');
+
+    const psLabel = pointsStatusLabel(item.pointsStatus);
+    if (psLabel) addBadge(psLabel.text, psLabel.tone);
+
+    summary.appendChild(badgeRow);
+    card.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-4 pb-4';
+
+    const linkRow = document.createElement('div');
+    linkRow.className = 'flex gap-2';
+
+    const linkInput = document.createElement('input');
+    linkInput.type = 'text';
+    linkInput.readOnly = true;
+    linkInput.value = shareUrl;
+    linkInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-600 bg-slate-50';
+    linkRow.appendChild(linkInput);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = 'コピー';
+    copyBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        copyBtn.textContent = 'コピー済み';
+        setTimeout(() => { copyBtn.textContent = 'コピー'; }, 1500);
+      });
+    });
+    linkRow.appendChild(copyBtn);
+    body.appendChild(linkRow);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = '削除';
+    deleteBtn.className = 'self-start text-xs font-medium text-rose-500 hover:text-rose-600 mt-1';
+    deleteBtn.addEventListener('click', () => {
+      if (!window.confirm('このコンテンツを削除しますか？')) return;
+
+      fetch('/api/creator/content/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshContentList();
+          } else {
+            alert('削除に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          alert('通信エラーが発生しました。');
+        });
+    });
+    body.appendChild(deleteBtn);
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function refreshContentList() {
+    fetch('/api/creator/content', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        const items = Array.isArray(data) ? data : [];
+
+        if (!items.length) {
+          contentListBox.innerHTML =
+            '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだアップロードされていません。</div>';
+        } else {
+          contentListBox.innerHTML = '';
+          items.forEach((item) => {
+            contentListBox.appendChild(buildContentCard(item));
+          });
+        }
+      })
+      .catch(() => {
+        contentListBox.innerHTML =
+          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+      });
+
+    fetch('/api/creators/me', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          currentBalance = data.pointsBalance || 0;
+          currentRedemptions = data.redemptionRequests || [];
+          refreshPointsBox();
+        }
+      })
+      .catch(() => {});
+  }
+
+  refreshContentList();
+})();
+</script>
+
+</body>
+</html>

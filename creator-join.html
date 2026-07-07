@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>アカウント登録 | ura-post.com</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#14b8a6;
+    --accent-teal-dark:#0d9488;
+  }
+  html,body{
+    background:#f4f7fa;
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #e7edf3;
+    box-shadow:0 4px 20px rgba(15,45,60,0.06);
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 6px 16px rgba(20,184,166,0.35);
+    transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+  }
+  .btn-primary:active{ transform:scale(0.98); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
+</style>
+</head>
+<body class="min-h-screen w-full flex items-center justify-center p-4">
+
+<div class="w-full max-w-sm mx-auto flex flex-col gap-5">
+
+  <div id="invalidBox" class="hidden flex flex-col gap-2">
+    <h1 class="text-xl font-bold text-slate-800">この招待リンクは無効です</h1>
+    <p class="text-sm text-slate-500">リンクの有効期限が切れているか、既に登録済みの可能性があります。招待してくれた方にご確認ください。</p>
+  </div>
+
+  <div id="formBox" class="hidden flex flex-col gap-5">
+    <div>
+      <h1 class="text-xl font-bold text-slate-800">アカウント登録</h1>
+      <p class="text-xs text-slate-400 mt-1">ログインに使うパスワードを設定してください（8文字以上）。</p>
+    </div>
+
+    <form id="registerForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">パスワード（8文字以上）</span>
+        <input type="password" name="password" required minlength="8" autocomplete="new-password"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">パスワード（確認）</span>
+        <input type="password" name="passwordConfirm" required minlength="8" autocomplete="new-password"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
+
+      <button type="submit" id="registerSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+        登録する
+      </button>
+
+      <p id="registerResultMsg" class="text-sm text-rose-500"></p>
+    </form>
+  </div>
+
+  <div id="successBox" class="hidden flex flex-col gap-4">
+    <h1 class="text-xl font-bold text-slate-800">登録が完了しました</h1>
+    <div class="card rounded-2xl p-4 flex flex-col gap-2">
+      <p class="text-xs font-bold text-rose-500">今後のログインに必要です。必ずスクリーンショット等で保存してください。</p>
+      <p class="text-[11px] text-slate-500">ログインコード</p>
+      <p id="loginCodeText" class="text-2xl font-bold tracking-widest text-slate-800"></p>
+    </div>
+    <a href="/creator" class="btn-primary rounded-lg py-3 text-sm font-bold text-center">
+      ダッシュボードへ進む
+    </a>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  const state = {{INVITE_STATE_JSON}};
+
+  const invalidBox = document.getElementById('invalidBox');
+  const formBox = document.getElementById('formBox');
+  const successBox = document.getElementById('successBox');
+
+  if (!state.valid) {
+    invalidBox.classList.remove('hidden');
+    return;
+  }
+  formBox.classList.remove('hidden');
+
+  const registerForm = document.getElementById('registerForm');
+  const submitBtn = document.getElementById('registerSubmitBtn');
+  const resultMsg = document.getElementById('registerResultMsg');
+
+  registerForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    resultMsg.textContent = '';
+
+    const formData = new FormData(registerForm);
+    const password = formData.get('password');
+    const passwordConfirm = formData.get('passwordConfirm');
+
+    if (password !== passwordConfirm) {
+      resultMsg.textContent = 'パスワードが一致しません。';
+      return;
+    }
+
+    submitBtn.disabled = true;
+
+    fetch('/api/creator/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inviteToken: state.token, password: password }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (status === 200 && data.ok) {
+          formBox.classList.add('hidden');
+          successBox.classList.remove('hidden');
+          document.getElementById('loginCodeText').textContent = data.loginCode;
+        } else {
+          submitBtn.disabled = false;
+          resultMsg.textContent = '登録に失敗しました（' + (data.error || status) + '）';
+        }
+      })
+      .catch(() => {
+        submitBtn.disabled = false;
+        resultMsg.textContent = '通信エラーが発生しました。';
+      });
+  });
+})();
+</script>
+
+</body>
+</html>

@@ -30,10 +30,29 @@
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-ads     既定（動画に個別設定が無い場合用）の広告A/Bと表示比率の更新（JSON）※要ログイン
+- POST /api/set-points  クリエイターへのポイント付与ルール（アップロード1件の付与量・24時間以内の最低閲覧数）の更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
 - POST /api/reset-og-image  OGP画像を同梱の既定画像に戻す（JSON）※要ログイン
 
+クリエイター(女の子)アカウント。管理者(上記の/api/login)とは完全に別のセッション/Cookieで扱う:
+- GET  /join/<invite_token>  招待受諾ページ。パスワードを設定してアカウントを有効化する
+- GET  /creator          クリエイター向けダッシュボード。未ログインならログイン画面
+- POST /api/creator/register  招待トークン+パスワードで登録し、セッションCookieを発行
+- POST /api/creator/login  ログインコード+パスワードでログイン
+- POST /api/creator/logout
+- GET  /api/creator/content  自分がアップロードしたコンテンツの一覧(JSON、ポイント状況込み)※要クリエイターログイン
+- GET  /api/creators/me  自分のポイント残高・交換申請履歴(JSON)※要クリエイターログイン
+- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード ※要クリエイターログイン
+- POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
+- POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（JSON）※要クリエイターログイン
+- GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
+- POST /api/creators/invite  招待URL+ログインコードを新規発行（JSON）※要ログイン(管理者)
+- POST /api/creators/approve-points  投稿1件を承認しポイント付与（サーバー側で状態を再検証）※要ログイン(管理者)
+- POST /api/creators/adjust-points  ポイント残高の手動調整（返金・是正用）※要ログイン(管理者)
+- POST /api/creators/fulfill-redemption  ギフト券交換申請を対応済みにする（JSON）※要ログイン(管理者)
+
 ※「要ログイン」の操作は、/api/login で発行されたセッションCookieが無いと401になる。
+※「要クリエイターログイン」の操作は、/api/creator/login等で発行された別のセッションCookieが無いと401になる。
 
 環境変数:
   - PORT              待ち受けポート（Renderが自動設定。ローカルでは未設定なら5173）
@@ -59,6 +78,7 @@ import os
 import re
 import secrets
 import struct
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -128,6 +148,89 @@ VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# ---------- クリエイター（女の子）アカウント / ポイント・ギフト券システム ----------
+# 招待制のセルフアップロードアカウント。管理者アカウントとは完全に別のセッション・
+# Cookieで扱う（管理者用のSESSIONS/認証コードには一切手を入れない）。
+CREATORS_META_PATH = os.path.join(UPLOAD_DIR, "creators.json")
+
+CREATOR_SESSION_COOKIE_NAME = "sv_creator_session"
+CREATOR_SESSION_DURATION_SECONDS = 12 * 60 * 60  # 12時間（アップロード作業が長引くことを考慮し管理者より長め）
+CREATOR_SESSIONS = {}
+
+MIN_CREATOR_PASSWORD_LENGTH = 8
+LOGIN_CODE_RE = re.compile(r"^[A-F0-9]{8}$")
+
+# アップロードから24時間以内に、この閲覧数を超えないとポイント付与対象にならない。
+# 固定ポイント自体も含め、サイト全体の既定値。管理画面(ポイント設定)で変更可能。
+POINTS_WINDOW_SECONDS = 24 * 60 * 60
+DEFAULT_POINTS_PER_UPLOAD = 100
+DEFAULT_POINTS_VIEW_THRESHOLD = 10
+
+# creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
+# 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
+CREATORS_LOCK = threading.Lock()
+
+
+def load_creators():
+    if not os.path.exists(CREATORS_META_PATH):
+        return []
+    with open(CREATORS_META_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_creators(creators):
+    with open(CREATORS_META_PATH, "w", encoding="utf-8") as f:
+        json.dump(creators, f, ensure_ascii=False)
+
+
+def find_creator(creators, creator_id):
+    return next((c for c in creators if c["id"] == creator_id), None)
+
+
+def find_creator_by_login_code(creators, login_code):
+    return next((c for c in creators if c.get("login_code") == login_code and c.get("status") == "active"), None)
+
+
+def find_creator_by_invite_token(creators, invite_token):
+    return next((c for c in creators if c.get("invite_token") == invite_token and c.get("status") == "invited"), None)
+
+
+def hash_password(password, salt_hex=None):
+    """stdlibのみでのパスワードハッシュ化(PBKDF2-HMAC-SHA256, 20万イテレーション)。"""
+    salt_hex = salt_hex or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), 200_000)
+    return salt_hex, digest.hex()
+
+
+def verify_password(password, salt_hex, expected_hash_hex):
+    if not salt_hex or not expected_hash_hex:
+        return False
+    _, computed_hash_hex = hash_password(password, salt_hex)
+    return hmac.compare_digest(computed_hash_hex, expected_hash_hex)
+
+
+def get_points_status(video, config):
+    """クリエイター投稿1件の、ポイント付与に関する現在の状態を返す。
+
+    管理者自身のアップロード(owner_creator_id無し)には適用されないのでNoneを返す。
+    get_time_limit_status と同様、DBには「承認済みかどうか」しか保存せず、
+    それ以外の状態(集計中/対象外等)は呼ばれるたびに計算するだけにする。
+    """
+    if not video.get("owner_creator_id"):
+        return None
+    if video.get("points_awarded"):
+        return {"state": "awarded", "amount": video.get("points_awarded_amount"), "viewCount": video.get("view_count", 0)}
+
+    window_end = video.get("uploaded_at_epoch", 0) + POINTS_WINDOW_SECONDS
+    view_count = video.get("view_count", 0)
+    threshold = config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
+
+    if time.time() < window_end:
+        return {"state": "collecting", "viewCount": view_count, "threshold": threshold, "windowEndsAt": window_end}
+    if view_count >= threshold:
+        return {"state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold}
+    return {"state": "not_eligible", "viewCount": view_count, "threshold": threshold}
+
 
 def load_config():
     if not os.path.exists(CONFIG_PATH):
@@ -136,6 +239,8 @@ def load_config():
             "premium_button_text": DEFAULT_PREMIUM_BUTTON_TEXT,
             "ads": json.loads(json.dumps(DEFAULT_ADS)),
             "og_image_filename": None,
+            "points_per_upload": DEFAULT_POINTS_PER_UPLOAD,
+            "points_view_threshold": DEFAULT_POINTS_VIEW_THRESHOLD,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -143,6 +248,8 @@ def load_config():
     config.setdefault("premium_button_text", DEFAULT_PREMIUM_BUTTON_TEXT)
     config.setdefault("ads", json.loads(json.dumps(DEFAULT_ADS)))
     config.setdefault("og_image_filename", None)
+    config.setdefault("points_per_upload", DEFAULT_POINTS_PER_UPLOAD)
+    config.setdefault("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
     return config
 
 
@@ -292,6 +399,16 @@ def parse_cookies(cookie_header):
 
 def serialize_ad(ad):
     return {"id": ad["id"], "label": ad["label"], "adCode": ad["ad_code"], "weight": ad["weight"]}
+
+
+def serialize_redemption_request(r):
+    return {
+        "id": r["id"],
+        "points": r["points"],
+        "status": r["status"],
+        "requestedAt": r.get("requested_at"),
+        "fulfilledAt": r.get("fulfilled_at"),
+    }
 
 
 def validate_ads_payload(ads_input):
@@ -445,6 +562,54 @@ class Handler(BaseHTTPRequestHandler):
     def clear_session_cookie(self):
         self.send_header("Set-Cookie", f"{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
 
+    # ---------- 認証(クリエイター用セッションCookie。管理者用とは完全に別物) ----------
+    def get_creator_id(self):
+        """クリエイターとしてログイン中ならそのidを、そうでなければNoneを返す。"""
+        cookies = parse_cookies(self.headers.get("Cookie"))
+        token = cookies.get(CREATOR_SESSION_COOKIE_NAME)
+        if not token or token not in CREATOR_SESSIONS:
+            return None
+        session = CREATOR_SESSIONS[token]
+        if session["expires"] < time.time():
+            del CREATOR_SESSIONS[token]
+            return None
+        return session["creator_id"]
+
+    def require_creator_auth(self):
+        """要クリエイターログインの操作の先頭で呼ぶ。未ログインなら401を返してTrueを返す。"""
+        if self.get_creator_id() is not None:
+            return False
+        self.respond_json(401, {"ok": False, "error": "not_authenticated"})
+        return True
+
+    def create_creator_session(self, creator_id):
+        now = time.time()
+        for existing_token in [t for t, s in CREATOR_SESSIONS.items() if s["expires"] < now]:
+            del CREATOR_SESSIONS[existing_token]
+
+        token = secrets.token_urlsafe(32)
+        CREATOR_SESSIONS[token] = {"creator_id": creator_id, "expires": now + CREATOR_SESSION_DURATION_SECONDS}
+        return token
+
+    def destroy_creator_session(self):
+        cookies = parse_cookies(self.headers.get("Cookie"))
+        token = cookies.get(CREATOR_SESSION_COOKIE_NAME)
+        if token:
+            CREATOR_SESSIONS.pop(token, None)
+
+    def set_creator_session_cookie(self, token):
+        cookie = (
+            f"{CREATOR_SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; Secure; "
+            f"SameSite=Strict; Max-Age={CREATOR_SESSION_DURATION_SECONDS}"
+        )
+        self.send_header("Set-Cookie", cookie)
+
+    def clear_creator_session_cookie(self):
+        self.send_header(
+            "Set-Cookie",
+            f"{CREATOR_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+        )
+
     # ---------- GET ----------
     def do_GET(self):
         split = urlsplit(self.path)
@@ -505,6 +670,25 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_serve_image(path[len("/image/"):])
         elif path == "/site-config":
             self.handle_site_config()
+        elif path.startswith("/join/"):
+            self.handle_serve_join_page(path[len("/join/"):])
+        elif path == "/creator":
+            if self.get_creator_id() is not None:
+                self.serve_file(os.path.join(BASE_DIR, "creator-dashboard.html"), "text/html; charset=utf-8")
+            else:
+                self.serve_file(os.path.join(BASE_DIR, "creator-login.html"), "text/html; charset=utf-8")
+        elif path == "/api/creator/content":
+            if self.require_creator_auth():
+                return
+            self.handle_list_creator_content()
+        elif path == "/api/creators":
+            if self.require_auth():
+                return
+            self.handle_list_creators()
+        elif path == "/api/creators/me":
+            if self.require_creator_auth():
+                return
+            self.handle_get_own_creator_info()
         else:
             self.send_error(404, "Not Found")
 
@@ -515,6 +699,8 @@ class Handler(BaseHTTPRequestHandler):
             "premiumButtonText": config["premium_button_text"],
             "ads": [serialize_ad(ad) for ad in config["ads"]],
             "hasCustomOgImage": bool(config.get("og_image_filename")),
+            "pointsPerUpload": config.get("points_per_upload", DEFAULT_POINTS_PER_UPLOAD),
+            "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -525,6 +711,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_list_videos(self):
         videos = sorted(load_videos(), key=lambda v: v["uploaded_at"], reverse=True)
+        config = load_config()
+        creators = load_creators()
         body = [
             {
                 "id": v["id"],
@@ -539,6 +727,11 @@ class Handler(BaseHTTPRequestHandler):
                 "statsToken": get_stats_token(v, videos),
                 "contentType": v.get("content_type", "video"),
                 "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
+                "ownerDisplayName": (
+                    (find_creator(creators, v["owner_creator_id"]) or {}).get("display_name")
+                    if v.get("owner_creator_id") else None
+                ),
+                "pointsStatus": get_points_status(v, config),
             }
             for v in videos
         ]
@@ -847,6 +1040,44 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_reset_og_image()
+        elif path == "/api/creator/register":
+            self.handle_creator_register()
+        elif path == "/api/creator/login":
+            self.handle_creator_login()
+        elif path == "/api/creator/logout":
+            self.handle_creator_logout()
+        elif path == "/api/creator/upload":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_upload()
+        elif path == "/api/creator/content/delete":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_delete_content()
+        elif path == "/api/creator/request-redemption":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_request_redemption()
+        elif path == "/api/set-points":
+            if self.require_auth():
+                return
+            self.handle_set_points()
+        elif path == "/api/creators/invite":
+            if self.require_auth():
+                return
+            self.handle_creators_invite()
+        elif path == "/api/creators/approve-points":
+            if self.require_auth():
+                return
+            self.handle_creators_approve_points()
+        elif path == "/api/creators/adjust-points":
+            if self.require_auth():
+                return
+            self.handle_creators_adjust_points()
+        elif path == "/api/creators/fulfill-redemption":
+            if self.require_auth():
+                return
+            self.handle_creators_fulfill_redemption()
         else:
             self.send_error(404, "Not Found")
 
@@ -945,6 +1176,39 @@ class Handler(BaseHTTPRequestHandler):
         save_config(config)
 
         self.respond_json(200, {"ok": True, "ads": [serialize_ad(ad) for ad in new_ads]})
+
+    def handle_set_points(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        points_per_upload = data.get("pointsPerUpload")
+        points_view_threshold = data.get("pointsViewThreshold")
+
+        def is_positive_int(value):
+            return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+        if not is_positive_int(points_per_upload) or not is_positive_int(points_view_threshold):
+            self.respond_json(400, {"ok": False, "error": "invalid_points_config"})
+            return
+
+        config = load_config()
+        config["points_per_upload"] = points_per_upload
+        config["points_view_threshold"] = points_view_threshold
+        save_config(config)
+
+        self.respond_json(200, {
+            "ok": True,
+            "pointsPerUpload": points_per_upload,
+            "pointsViewThreshold": points_view_threshold,
+        })
 
     def handle_set_video_ads(self):
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1131,6 +1395,20 @@ class Handler(BaseHTTPRequestHandler):
         self.respond_json(200, {"ok": True})
 
     def handle_upload(self):
+        self._process_upload_request(owner_creator_id=None)
+
+    def handle_creator_upload(self):
+        creator_id = self.get_creator_id()
+        self._process_upload_request(owner_creator_id=creator_id)
+
+    def _process_upload_request(self, owner_creator_id):
+        """multipart/form-dataを読んでバリデーションし、動画または画像ギャラリーを保存する。
+
+        管理者本人のアップロード(/api/upload, owner_creator_id=None)と
+        クリエイターのセルフアップロード(/api/creator/upload)の両方から使う共通処理。
+        owner_creator_id はサーバー側(セッション)から決まる値のみを渡すこと
+        (クライアントが送ってきた値をそのまま信用してはいけない)。
+        """
         content_type_header = self.headers.get("Content-Type", "")
         boundary_match = re.search(r"boundary=(.+)", content_type_header)
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1160,6 +1438,10 @@ class Handler(BaseHTTPRequestHandler):
 
         time_limit_enabled = fields.get("timeLimitEnabled") in ("1", "true", "on")
         content_type = fields.get("contentType") if fields.get("contentType") == "image" else "video"
+
+        owner_fields = {}
+        if owner_creator_id:
+            owner_fields = {"owner_creator_id": owner_creator_id, "uploaded_at_epoch": time.time()}
 
         if content_type == "image":
             image_files = files.get("images") or []
@@ -1199,6 +1481,7 @@ class Handler(BaseHTTPRequestHandler):
                 "time_limit_enabled": time_limit_enabled,
                 "stats_token": secrets.token_urlsafe(9),
                 **creator_fields,
+                **owner_fields,
             })
             save_videos(videos)
 
@@ -1236,6 +1519,7 @@ class Handler(BaseHTTPRequestHandler):
             "time_limit_enabled": time_limit_enabled,
             "stats_token": secrets.token_urlsafe(9),
             **creator_fields,
+            **owner_fields,
         })
         save_videos(videos)
 
@@ -1263,6 +1547,34 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(404, {"ok": False, "error": "not_found"})
             return
 
+        self._delete_video_entry(video_id, video)
+        self.respond_json(200, {"ok": True})
+
+    def handle_creator_delete_content(self):
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 10_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        video_id = data.get("id")
+        video = find_video(video_id)
+        # 他のクリエイターや管理者本人のコンテンツを消せないよう、所有者一致を必ず確認する
+        if not video or video.get("owner_creator_id") != creator_id:
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        self._delete_video_entry(video_id, video)
+        self.respond_json(200, {"ok": True})
+
+    def _delete_video_entry(self, video_id, video):
+        """動画/画像ギャラリー本体・サムネイル・videos.json中のエントリを削除する共通処理。"""
         if video.get("content_type") == "image":
             for image_filename in video.get("image_filenames") or []:
                 image_path = os.path.join(UPLOAD_DIR, image_filename)
@@ -1281,8 +1593,6 @@ class Handler(BaseHTTPRequestHandler):
 
         videos = [v for v in load_videos() if v["id"] != video_id]
         save_videos(videos)
-
-        self.respond_json(200, {"ok": True})
 
     def handle_set_og_image(self):
         content_type_header = self.headers.get("Content-Type", "")
@@ -1337,6 +1647,368 @@ class Handler(BaseHTTPRequestHandler):
                 os.remove(old_path)
         config["og_image_filename"] = None
         save_config(config)
+
+        self.respond_json(200, {"ok": True})
+
+    # ---------- クリエイター(女の子)アカウント: 招待・登録・ログイン ----------
+    def handle_serve_join_page(self, invite_token):
+        creators = load_creators()
+        creator = find_creator_by_invite_token(creators, invite_token)
+
+        with open(os.path.join(BASE_DIR, "creator-join.html"), "r", encoding="utf-8") as f:
+            page_html = f.read()
+
+        state = {"valid": bool(creator), "token": invite_token}
+        page_html = page_html.replace("{{INVITE_STATE_JSON}}", json.dumps(state))
+
+        body = page_html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_creator_register(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        invite_token = data.get("inviteToken") or ""
+        password = data.get("password") or ""
+        if len(password) < MIN_CREATOR_PASSWORD_LENGTH:
+            self.respond_json(400, {"ok": False, "error": "password_too_short"})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator_by_invite_token(creators, invite_token)
+            if not creator:
+                self.respond_json(400, {"ok": False, "error": "invalid_invite"})
+                return
+
+            salt_hex, hash_hex = hash_password(password)
+            creator["password_salt"] = salt_hex
+            creator["password_hash"] = hash_hex
+            creator["status"] = "active"
+            creator["activated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_creators(creators)
+            login_code = creator["login_code"]
+            creator_id = creator["id"]
+
+        token = self.create_creator_session(creator_id)
+        self.send_response(200)
+        self.set_creator_session_cookie(token)
+        payload = json.dumps({"ok": True, "loginCode": login_code}).encode("utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def handle_creator_login(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        login_code = (data.get("loginCode") or "").strip().upper()
+        password = data.get("password") or ""
+
+        creators = load_creators()
+        creator = find_creator_by_login_code(creators, login_code)
+        # ログインコード・パスワードのどちらが間違っていたかは区別せず返す
+        if not creator or not verify_password(password, creator.get("password_salt"), creator.get("password_hash")):
+            self.respond_json(401, {"ok": False, "error": "invalid_credentials"})
+            return
+
+        token = self.create_creator_session(creator["id"])
+        self.send_response(200)
+        self.set_creator_session_cookie(token)
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def handle_creator_logout(self):
+        self.destroy_creator_session()
+        self.send_response(200)
+        self.clear_creator_session_cookie()
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def handle_list_creator_content(self):
+        creator_id = self.get_creator_id()
+        config = load_config()
+        videos = sorted(load_videos(), key=lambda v: v["uploaded_at"], reverse=True)
+        own_videos = [v for v in videos if v.get("owner_creator_id") == creator_id]
+        body = [
+            {
+                "id": v["id"],
+                "originalFilename": v["original_filename"],
+                "uploadedAt": v["uploaded_at"],
+                "contentType": v.get("content_type", "video"),
+                "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
+                "timeLimit": get_time_limit_status(v),
+                "viewCount": v.get("view_count", 0),
+                "pointsStatus": get_points_status(v, config),
+            }
+            for v in own_videos
+        ]
+        self.respond_json(200, body)
+
+    def handle_get_own_creator_info(self):
+        creator_id = self.get_creator_id()
+        creators = load_creators()
+        creator = find_creator(creators, creator_id)
+        if not creator:
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        self.respond_json(200, {
+            "ok": True,
+            "pointsBalance": creator.get("points_balance", 0),
+            "redemptionRequests": [
+                serialize_redemption_request(r) for r in creator.get("redemption_requests", [])
+            ],
+        })
+
+    def handle_creator_request_redemption(self):
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        points = data.get("points")
+        if not isinstance(points, int) or isinstance(points, bool) or points <= 0:
+            self.respond_json(400, {"ok": False, "error": "invalid_points"})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+            if points > creator.get("points_balance", 0):
+                self.respond_json(400, {"ok": False, "error": "insufficient_balance"})
+                return
+
+            creator["points_balance"] -= points
+            creator.setdefault("redemption_requests", []).append({
+                "id": secrets.token_urlsafe(9),
+                "points": points,
+                "status": "pending",
+                "requested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "fulfilled_at": None,
+            })
+            save_creators(creators)
+            new_balance = creator["points_balance"]
+
+        self.respond_json(200, {"ok": True, "pointsBalance": new_balance})
+
+    # ---------- クリエイター(女の子)アカウント: 管理者側の操作 ----------
+    def handle_list_creators(self):
+        creators = load_creators()
+        body = [
+            {
+                "id": c["id"],
+                "displayName": c.get("display_name"),
+                "status": c["status"],
+                "loginCode": c.get("login_code"),
+                "pointsBalance": c.get("points_balance", 0),
+                "redemptionRequests": [serialize_redemption_request(r) for r in c.get("redemption_requests", [])],
+                "invitedAt": c.get("invited_at"),
+                "activatedAt": c.get("activated_at"),
+            }
+            for c in sorted(creators, key=lambda c: c.get("invited_at", ""), reverse=True)
+        ]
+        self.respond_json(200, body)
+
+    def handle_creators_invite(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length < 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            raw = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+            data = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        display_name = (data.get("displayName") or "").strip()[:40]
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = {
+                "id": secrets.token_urlsafe(9),
+                "display_name": display_name or None,
+                "invite_token": secrets.token_urlsafe(16),
+                "login_code": secrets.token_hex(4).upper(),
+                "status": "invited",
+                "password_salt": None,
+                "password_hash": None,
+                "points_balance": 0,
+                "points_history": [],
+                "redemption_requests": [],
+                "invited_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "activated_at": None,
+            }
+            creators.append(creator)
+            save_creators(creators)
+
+        self.respond_json(200, {
+            "ok": True,
+            "id": creator["id"],
+            "inviteUrl": PUBLIC_SITE_URL + "/join/" + creator["invite_token"],
+            "loginCode": creator["login_code"],
+        })
+
+    def handle_creators_approve_points(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        content_id = data.get("contentId")
+
+        with CREATORS_LOCK:
+            config = load_config()
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == content_id), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            # クライアント側の表示だけを信用せず、サーバー側で承認可能な状態か再検証する
+            status = get_points_status(video, config)
+            if not status or status["state"] != "eligible_pending_approval":
+                self.respond_json(400, {"ok": False, "error": "not_eligible"})
+                return
+
+            amount = config.get("points_per_upload", DEFAULT_POINTS_PER_UPLOAD)
+
+            creators = load_creators()
+            creator = find_creator(creators, video.get("owner_creator_id"))
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "creator_not_found"})
+                return
+
+            creator["points_balance"] = creator.get("points_balance", 0) + amount
+            creator.setdefault("points_history", []).append({
+                "delta": amount,
+                "reason": "upload_approved",
+                "content_id": content_id,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            save_creators(creators)
+
+            video["points_awarded"] = True
+            video["points_awarded_amount"] = amount
+            video["points_awarded_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_videos(videos)
+
+        self.respond_json(200, {"ok": True, "amount": amount})
+
+    def handle_creators_adjust_points(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+        delta = data.get("delta")
+        note = (data.get("note") or "").strip()[:200]
+        if not isinstance(delta, (int, float)) or isinstance(delta, bool) or delta == 0:
+            self.respond_json(400, {"ok": False, "error": "invalid_delta"})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["points_balance"] = creator.get("points_balance", 0) + delta
+            creator.setdefault("points_history", []).append({
+                "delta": delta,
+                "reason": "manual_adjustment: " + note if note else "manual_adjustment",
+                "content_id": None,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            save_creators(creators)
+            new_balance = creator["points_balance"]
+
+        self.respond_json(200, {"ok": True, "pointsBalance": new_balance})
+
+    def handle_creators_fulfill_redemption(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+        request_id = data.get("requestId")
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            request = next((r for r in creator.get("redemption_requests", []) if r["id"] == request_id), None)
+            if not request or request["status"] != "pending":
+                self.respond_json(400, {"ok": False, "error": "invalid_request_state"})
+                return
+
+            request["status"] = "fulfilled"
+            request["fulfilled_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_creators(creators)
 
         self.respond_json(200, {"ok": True})
 

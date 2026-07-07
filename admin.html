@@ -116,6 +116,60 @@
   </div>
 
   <div>
+    <h2 class="text-lg font-bold text-slate-800">ポイント設定</h2>
+    <p class="text-xs text-slate-400 mt-1">クリエイターのアップロード1件あたりの付与ポイントと、24時間以内に必要な最低閲覧数です。</p>
+  </div>
+
+  <div id="pointsStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
+    現在の状態を確認しています…
+  </div>
+
+  <form id="pointsForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">アップロード1件あたりの付与ポイント</span>
+      <input type="number" name="pointsPerUpload" required min="1" step="1" placeholder="100"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">24時間以内に必要な最低閲覧数</span>
+      <input type="number" name="pointsViewThreshold" required min="1" step="1" placeholder="10"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <button type="submit" id="pointsSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      更新
+    </button>
+    <p id="pointsResultMsg" class="text-sm"></p>
+  </form>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">女の子アカウント管理</h2>
+    <p class="text-xs text-slate-400 mt-1">スカウトした子だけに招待URLを発行します。招待URLとログインコードの両方を本人にお渡しください。</p>
+  </div>
+
+  <div>
+    <h3 class="text-sm font-bold text-slate-700">保留中のギフト券交換申請</h3>
+  </div>
+  <div id="pendingRedemptionsBox" class="flex flex-col gap-2">
+    <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
+  </div>
+
+  <form id="inviteForm" class="card rounded-2xl p-4 flex flex-col gap-3">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">表示名（メモ用・任意）</span>
+      <input type="text" name="displayName" maxlength="40" placeholder="例: あかりさん"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <button type="submit" id="inviteSubmitBtn" class="btn-primary rounded-lg py-2.5 text-sm font-bold">
+      招待URLを発行する
+    </button>
+    <div id="inviteResultBox" class="hidden flex flex-col gap-2 border border-teal-100 rounded-xl p-3 bg-teal-50/40"></div>
+  </form>
+
+  <div id="creatorListBox" class="flex flex-col gap-3">
+    <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
+  </div>
+
+  <div>
     <h2 class="text-lg font-bold text-slate-800">プレミアムリンク設定</h2>
     <p class="text-xs text-slate-400 mt-1">アンロック後に表示される誘導ボタンのリンク先と文字です。</p>
   </div>
@@ -256,6 +310,17 @@
   const adsResultMsg = document.getElementById('adsResultMsg');
   const logoutBtn    = document.getElementById('logoutBtn');
 
+  const pointsStatusBox = document.getElementById('pointsStatusBox');
+  const pointsForm      = document.getElementById('pointsForm');
+  const pointsSubmitBtn = document.getElementById('pointsSubmitBtn');
+  const pointsResultMsg = document.getElementById('pointsResultMsg');
+
+  const inviteForm      = document.getElementById('inviteForm');
+  const inviteSubmitBtn = document.getElementById('inviteSubmitBtn');
+  const inviteResultBox = document.getElementById('inviteResultBox');
+  const creatorListBox  = document.getElementById('creatorListBox');
+  const pendingRedemptionsBox = document.getElementById('pendingRedemptionsBox');
+
   const ogImagePreview  = document.getElementById('ogImagePreview');
   const ogImageStatusText = document.getElementById('ogImageStatusText');
   const ogImageForm     = document.getElementById('ogImageForm');
@@ -282,6 +347,8 @@
   refreshLinkStatus();
   refreshAdsStatus();
   refreshOgImageStatus();
+  refreshPointsStatus();
+  refreshCreatorList();
 
   function refreshOgImageStatus() {
     fetch('/site-config', { cache: 'no-store' })
@@ -426,6 +493,325 @@
       });
   });
 
+  function refreshPointsStatus() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        pointsStatusBox.textContent =
+          `付与ポイント: ${data.pointsPerUpload}pt / 24時間以内の最低閲覧数: ${data.pointsViewThreshold}`;
+        pointsForm.elements['pointsPerUpload'].value = data.pointsPerUpload;
+        pointsForm.elements['pointsViewThreshold'].value = data.pointsViewThreshold;
+      })
+      .catch(() => {
+        pointsStatusBox.textContent = '状態の取得に失敗しました。';
+      });
+  }
+
+  pointsForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    pointsResultMsg.textContent = '';
+    pointsResultMsg.className = 'text-sm';
+    pointsSubmitBtn.disabled = true;
+
+    const formData = new FormData(pointsForm);
+
+    fetch('/api/set-points', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pointsPerUpload: Number(formData.get('pointsPerUpload')),
+        pointsViewThreshold: Number(formData.get('pointsViewThreshold')),
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        pointsSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          pointsResultMsg.textContent = '更新しました。';
+          pointsResultMsg.classList.add('text-teal-600');
+          refreshPointsStatus();
+          refreshVideoList();
+        } else {
+          pointsResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          pointsResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        pointsSubmitBtn.disabled = false;
+        pointsResultMsg.textContent = '通信エラーが発生しました。';
+        pointsResultMsg.classList.add('text-rose-500');
+      });
+  });
+
+  inviteForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    inviteResultBox.classList.add('hidden');
+    inviteResultBox.innerHTML = '';
+    inviteSubmitBtn.disabled = true;
+
+    const formData = new FormData(inviteForm);
+
+    fetch('/api/creators/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: formData.get('displayName') }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        inviteSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          inviteResultBox.classList.remove('hidden');
+
+          const urlRow = document.createElement('div');
+          urlRow.className = 'flex gap-2';
+          const urlInput = document.createElement('input');
+          urlInput.type = 'text';
+          urlInput.readOnly = true;
+          urlInput.value = data.inviteUrl;
+          urlInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white';
+          urlRow.appendChild(urlInput);
+          inviteResultBox.appendChild(urlRow);
+
+          const label = document.createElement('p');
+          label.className = 'text-xs text-slate-500';
+          label.textContent = '↑招待URL（初回登録用）。ログインコード: ' + data.loginCode + '（登録後も本人はこれを使ってログインします）';
+          inviteResultBox.appendChild(label);
+
+          inviteForm.reset();
+          refreshCreatorList();
+        } else {
+          inviteResultBox.classList.remove('hidden');
+          const errMsg = document.createElement('p');
+          errMsg.className = 'text-sm text-rose-500';
+          errMsg.textContent = '発行に失敗しました（' + (data.error || status) + '）';
+          inviteResultBox.appendChild(errMsg);
+        }
+      })
+      .catch(() => {
+        inviteSubmitBtn.disabled = false;
+        inviteResultBox.classList.remove('hidden');
+        inviteResultBox.innerHTML = '<p class="text-sm text-rose-500">通信エラーが発生しました。</p>';
+      });
+  });
+
+  function refreshCreatorList() {
+    fetch('/api/creators', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        const creators = Array.isArray(data) ? data : [];
+
+        renderPendingRedemptions(creators);
+
+        if (!creators.length) {
+          creatorListBox.innerHTML =
+            '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ招待していません。</div>';
+          return;
+        }
+        creatorListBox.innerHTML = '';
+        creators.forEach((creator) => {
+          creatorListBox.appendChild(buildCreatorCard(creator));
+        });
+      })
+      .catch(() => {
+        creatorListBox.innerHTML =
+          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+        pendingRedemptionsBox.innerHTML =
+          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+      });
+  }
+
+  function renderPendingRedemptions(creators) {
+    const rows = [];
+    creators.forEach((creator) => {
+      (creator.redemptionRequests || [])
+        .filter((req) => req.status !== 'fulfilled')
+        .forEach((req) => rows.push({ creator, req }));
+    });
+
+    if (!rows.length) {
+      pendingRedemptionsBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">保留中の申請はありません。</div>';
+      return;
+    }
+
+    // 申請日時が古い順（先に申請した子から対応できるように）
+    rows.sort((a, b) => (a.req.requestedAt || '').localeCompare(b.req.requestedAt || ''));
+
+    pendingRedemptionsBox.innerHTML = '';
+    rows.forEach(({ creator, req }) => {
+      pendingRedemptionsBox.appendChild(buildPendingRedemptionRow(creator, req));
+    });
+  }
+
+  function buildCreatorCard(creator) {
+    const card = document.createElement('details');
+    card.className = 'card rounded-2xl overflow-hidden';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none p-4 flex flex-col gap-1';
+
+    const title = document.createElement('p');
+    title.className = 'text-sm font-medium text-slate-700 break-all';
+    title.textContent = creator.displayName || '（名前未設定）';
+    summary.appendChild(title);
+
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'flex flex-wrap gap-1 mt-1';
+
+    function addBadge(text, tone) {
+      const badge = document.createElement('span');
+      badge.textContent = text;
+      badge.className = 'text-[11px] px-2 py-0.5 rounded-full ' + tone;
+      badgeRow.appendChild(badge);
+    }
+
+    addBadge(
+      creator.status === 'active' ? 'アクティブ' : '招待中（未登録）',
+      creator.status === 'active' ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'
+    );
+    addBadge('残高: ' + (creator.pointsBalance || 0) + 'pt', 'bg-slate-100 text-slate-600');
+
+    const pendingCount = (creator.redemptionRequests || []).filter((r) => r.status === 'pending').length;
+    if (pendingCount) {
+      addBadge('交換申請 ' + pendingCount + '件', 'bg-rose-50 text-rose-600');
+    }
+
+    summary.appendChild(badgeRow);
+    card.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-3 px-4 pb-4';
+
+    const codeRow = document.createElement('p');
+    codeRow.className = 'text-xs text-slate-500';
+    codeRow.textContent = 'ログインコード: ' + (creator.loginCode || '-');
+    body.appendChild(codeRow);
+
+    // 手動ポイント調整
+    const adjustWrap = document.createElement('div');
+    adjustWrap.className = 'flex gap-2 items-center';
+
+    const adjustInput = document.createElement('input');
+    adjustInput.type = 'number';
+    adjustInput.placeholder = '例: 100 / -50';
+    adjustInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    adjustWrap.appendChild(adjustInput);
+
+    const adjustBtn = document.createElement('button');
+    adjustBtn.type = 'button';
+    adjustBtn.textContent = 'ポイント調整';
+    adjustBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    adjustBtn.addEventListener('click', () => {
+      const delta = Number(adjustInput.value);
+      if (!delta) return;
+      adjustBtn.disabled = true;
+
+      fetch('/api/creators/adjust-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id, delta: delta }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          adjustBtn.disabled = false;
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+          } else {
+            alert('調整に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          adjustBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    adjustWrap.appendChild(adjustBtn);
+    body.appendChild(adjustWrap);
+
+    // 交換申請一覧
+    const requests = creator.redemptionRequests || [];
+    if (requests.length) {
+      const reqHeading = document.createElement('p');
+      reqHeading.className = 'text-[11px] font-bold text-slate-500 mt-1';
+      reqHeading.textContent = 'ギフト券交換申請';
+      body.appendChild(reqHeading);
+
+      requests.slice().reverse().forEach((req) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-2 border border-slate-100 rounded-lg px-3 py-2 text-xs';
+
+        const label = document.createElement('span');
+        label.textContent = req.points + 'pt（' + req.requestedAt + '）'
+          + (req.status === 'fulfilled' ? ' - 対応済み' : ' - 申請中');
+        row.appendChild(label);
+
+        if (req.status !== 'fulfilled') {
+          const fulfillBtn = document.createElement('button');
+          fulfillBtn.type = 'button';
+          fulfillBtn.textContent = '対応済みにする';
+          fulfillBtn.className = 'shrink-0 border border-teal-500 text-teal-600 rounded-lg px-2 py-1 text-xs font-medium hover:bg-teal-50';
+          fulfillBtn.addEventListener('click', () => {
+            fulfillRedemptionRequest(creator.id, req.id, fulfillBtn);
+          });
+          row.appendChild(fulfillBtn);
+        }
+
+        body.appendChild(row);
+      });
+    }
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function fulfillRedemptionRequest(creatorId, requestId, btn) {
+    btn.disabled = true;
+    fetch('/api/creators/fulfill-redemption', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creatorId: creatorId, requestId: requestId }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          refreshCreatorList();
+        } else {
+          btn.disabled = false;
+          alert('更新に失敗しました（' + (data.error || status) + '）');
+        }
+      })
+      .catch(() => {
+        btn.disabled = false;
+        alert('通信エラーが発生しました。');
+      });
+  }
+
+  function buildPendingRedemptionRow(creator, req) {
+    const row = document.createElement('div');
+    row.className = 'card rounded-2xl p-3 flex items-center justify-between gap-2 text-sm';
+
+    const label = document.createElement('span');
+    label.className = 'text-slate-700';
+    label.textContent = (creator.displayName || '（名前未設定）') + ' - ' + req.points + 'pt（' + req.requestedAt + '）';
+    row.appendChild(label);
+
+    const fulfillBtn = document.createElement('button');
+    fulfillBtn.type = 'button';
+    fulfillBtn.textContent = '対応済みにする';
+    fulfillBtn.className = 'shrink-0 border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+    fulfillBtn.addEventListener('click', () => {
+      fulfillRedemptionRequest(creator.id, req.id, fulfillBtn);
+    });
+    row.appendChild(fulfillBtn);
+
+    return row;
+  }
+
   function refreshLinkStatus() {
     fetch('/site-config', { cache: 'no-store' })
       .then((res) => res.json())
@@ -542,6 +928,21 @@
     if (video.hasCustomThumbnail) {
       addBadge('サムネイル個別設定', 'bg-teal-50 text-teal-700');
     }
+    if (video.ownerDisplayName) {
+      addBadge('投稿者: ' + video.ownerDisplayName, 'bg-sky-50 text-sky-700');
+    }
+    const ps = video.pointsStatus;
+    if (ps) {
+      if (ps.state === 'collecting') {
+        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧）', 'bg-slate-100 text-slate-500');
+      } else if (ps.state === 'eligible_pending_approval') {
+        addBadge('ポイント承認待ち', 'bg-rose-50 text-rose-600');
+      } else if (ps.state === 'awarded') {
+        addBadge('ポイント付与済み（+' + ps.amount + 'pt）', 'bg-teal-50 text-teal-700');
+      } else if (ps.state === 'not_eligible') {
+        addBadge('ポイント対象外（閲覧数未達）', 'bg-slate-100 text-slate-400');
+      }
+    }
     if (badgeRow.children.length) {
       summary.appendChild(badgeRow);
     }
@@ -597,6 +998,38 @@
 
     body.appendChild(linkRow);
     body.appendChild(statsRow);
+
+    if (ps && ps.state === 'eligible_pending_approval') {
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.textContent = '承認してポイント付与';
+      approveBtn.className = 'border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+      approveBtn.addEventListener('click', () => {
+        approveBtn.disabled = true;
+        fetch('/api/creators/approve-points', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentId: video.id }),
+        })
+          .then((res) => res.json().then((data) => ({ status: res.status, data })))
+          .then(({ status, data }) => {
+            if (redirectIfUnauthenticated(status)) return;
+            if (status === 200 && data.ok) {
+              refreshVideoList();
+              refreshCreatorList();
+            } else {
+              approveBtn.disabled = false;
+              alert('承認に失敗しました（' + (data.error || status) + '）');
+            }
+          })
+          .catch(() => {
+            approveBtn.disabled = false;
+            alert('通信エラーが発生しました。');
+          });
+      });
+      body.appendChild(approveBtn);
+    }
+
     body.appendChild(buildVideoTimeLimitSection(video));
     body.appendChild(buildVideoCtaSection(video));
     body.appendChild(buildVideoAdsSection(video));

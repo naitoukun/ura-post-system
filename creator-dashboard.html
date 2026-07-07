@@ -73,6 +73,8 @@
     <div id="redemptionHistoryBox" class="flex flex-col gap-1"></div>
   </form>
 
+  <p id="dailyUploadStatusText" class="text-xs text-slate-400"></p>
+
   <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <div class="flex flex-col gap-1">
       <span class="text-sm font-medium text-slate-700">コンテンツの種類</span>
@@ -146,6 +148,7 @@
   const contentListBox = document.getElementById('contentListBox');
   const logoutBtn   = document.getElementById('logoutBtn');
   const pointsBalanceText = document.getElementById('pointsBalanceText');
+  const dailyUploadStatusText = document.getElementById('dailyUploadStatusText');
 
   const redemptionForm = document.getElementById('redemptionForm');
   const redemptionSubmitBtn = document.getElementById('redemptionSubmitBtn');
@@ -211,6 +214,8 @@
         return '対応していないファイル形式です。';
       case 'file_too_large':
         return 'ファイルサイズが大きすぎます。';
+      case 'daily_upload_limit_reached':
+        return '本日のアップロード上限（' + (data.maxUploadsPerDay || 2) + '件）に達しました。日付が変わってから再度お試しください。';
       default:
         return null;
     }
@@ -491,6 +496,11 @@
           currentBalance = data.pointsBalance || 0;
           currentRedemptions = data.redemptionRequests || [];
           refreshPointsBox();
+
+          if (typeof data.maxUploadsPerDay === 'number') {
+            dailyUploadStatusText.textContent =
+              '本日のアップロード: ' + (data.uploadsToday || 0) + ' / ' + data.maxUploadsPerDay + '件（日付が変わるとリセットされます）';
+          }
         }
       })
       .catch(() => {});

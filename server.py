@@ -43,7 +43,8 @@
 - POST /api/creator/logout
 - GET  /api/creator/content  自分がアップロードしたコンテンツの一覧(JSON、ポイント状況込み)※要クリエイターログイン
 - GET  /api/creators/me  自分のポイント残高・交換申請履歴(JSON)※要クリエイターログイン
-- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は30秒以上・画像は5枚以上が必須）※要クリエイターログイン
+- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は30秒以上・画像は5枚以上が必須。
+                        1日あたりの合計アップロード件数にも上限あり）※要クリエイターログイン
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
 - POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（最低申請ポイント数あり、JSON）※要クリエイターログイン
 - GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
@@ -187,6 +188,10 @@ DEFAULT_MIN_REDEMPTION_POINTS = 1500
 MIN_CREATOR_VIDEO_DURATION_SECONDS = 30
 MIN_CREATOR_IMAGE_COUNT = 5
 
+# クリエイターのセルフアップロードは1日(サーバーのローカル日付基準。動画/画像の合計)に
+# この件数まで。管理者自身の/api/uploadには適用しない。
+MAX_CREATOR_UPLOADS_PER_DAY = 2
+
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
 CREATORS_LOCK = threading.Lock()
@@ -214,6 +219,33 @@ def find_creator_by_login_code(creators, login_code):
 
 def find_creator_by_invite_token(creators, invite_token):
     return next((c for c in creators if c.get("invite_token") == invite_token and c.get("status") == "invited"), None)
+
+
+def check_and_increment_daily_upload_count(creator):
+    """クリエイターの1日の合計アップロード件数(動画/画像の合計)をチェックし、
+
+    上限内であれば+1して記録しTrueを返す。既に上限に達していればFalseを返す
+    (呼び出し側はアップロードを拒否する)。日付が変わっていれば0からリセットしてから判定する。
+    「1日」はサーバーのローカル日付(このVPSはAsia/Tokyoに設定済み)を基準にする。
+    """
+    today = time.strftime("%Y-%m-%d")
+    if creator.get("upload_count_date") != today:
+        creator["upload_count_date"] = today
+        creator["upload_count_today"] = 0
+
+    if creator.get("upload_count_today", 0) >= MAX_CREATOR_UPLOADS_PER_DAY:
+        return False
+
+    creator["upload_count_today"] = creator.get("upload_count_today", 0) + 1
+    return True
+
+
+def get_todays_upload_count(creator):
+    """表示用に、加算はせず本日のアップロード件数だけを返す。"""
+    today = time.strftime("%Y-%m-%d")
+    if creator.get("upload_count_date") != today:
+        return 0
+    return creator.get("upload_count_today", 0)
 
 
 def hash_password(password, salt_hex=None):
@@ -1638,6 +1670,32 @@ class Handler(BaseHTTPRequestHandler):
         creator_id = self.get_creator_id()
         self._process_upload_request(owner_creator_id=creator_id)
 
+    def _enforce_creator_daily_upload_limit(self, owner_creator_id):
+        """クリエイターの1日の合計アップロード件数の上限をチェックする。
+
+        上限に達していて拒否すべき場合はエラーレスポンスを返してTrueを返す
+        (呼び出し側はこの後returnすること)。それ以外はFalseを返す。
+        管理者本人のアップロード(owner_creator_id無し)には適用しない。
+        """
+        if not owner_creator_id:
+            return False
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, owner_creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "creator_not_found"})
+                return True
+            if not check_and_increment_daily_upload_count(creator):
+                self.respond_json(400, {
+                    "ok": False,
+                    "error": "daily_upload_limit_reached",
+                    "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
+                })
+                return True
+            save_creators(creators)
+        return False
+
     def _process_upload_request(self, owner_creator_id):
         """multipart/form-dataを読んでバリデーションし、動画または画像ギャラリーを保存する。
 
@@ -1704,6 +1762,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.respond_json(413, {"ok": False, "error": "file_too_large"})
                     return
 
+            if self._enforce_creator_daily_upload_limit(owner_creator_id):
+                return
+
             content_id = secrets.token_urlsafe(9)
             image_filenames = []
             for index, image_file in enumerate(image_files):
@@ -1759,6 +1820,9 @@ class Handler(BaseHTTPRequestHandler):
                     "minVideoDurationSeconds": MIN_CREATOR_VIDEO_DURATION_SECONDS,
                 })
                 return
+
+        if self._enforce_creator_daily_upload_limit(owner_creator_id):
+            return
 
         video_id = secrets.token_urlsafe(9)
         stored_filename = video_id + ext
@@ -2049,6 +2113,8 @@ class Handler(BaseHTTPRequestHandler):
             "redemptionRequests": [
                 serialize_redemption_request(r) for r in creator.get("redemption_requests", [])
             ],
+            "uploadsToday": get_todays_upload_count(creator),
+            "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
         })
 
     def handle_creator_request_redemption(self):
@@ -2114,6 +2180,8 @@ class Handler(BaseHTTPRequestHandler):
                 "pointsPerVideoUpload": c.get("points_per_video_upload"),
                 "pointsPerImageUpload": c.get("points_per_image_upload"),
                 "contactUrl": c.get("contact_url"),
+                "uploadsToday": get_todays_upload_count(c),
+                "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
             }
             for c in sorted(creators, key=lambda c: c.get("invited_at", ""), reverse=True)
         ]

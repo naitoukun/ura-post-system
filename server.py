@@ -55,6 +55,7 @@
 - GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
 - POST /api/creators/invite  招待URL+ログインコードを新規発行（JSON）※要ログイン(管理者)
 - POST /api/creators/approve-points  投稿1件を承認しポイント付与（サーバー側で状態を再検証）※要ログイン(管理者)
+- POST /api/creators/approve-all-points  承認待ちの投稿を全件まとめて承認しポイント付与（JSON、パラメータ無し）※要ログイン(管理者)
 - POST /api/creators/adjust-points  ポイント残高の手動調整（返金・是正用）※要ログイン(管理者)
 - POST /api/creators/fulfill-redemption  ギフト券交換申請を対応済みにする（JSON）※要ログイン(管理者)
 - POST /api/creators/set-points-override  クリエイターごとの動画/画像付与ポイントの個別上書き（null=サイト既定値を使用）（JSON）※要ログイン(管理者)
@@ -469,6 +470,40 @@ def get_points_status(video, creator, config):
             "bonusThreshold": bonus_threshold, "bonusEligible": bonus_eligible, "bonusAmount": bonus_amount,
         }
     return {"state": "not_eligible", "viewCount": view_count, "threshold": threshold}
+
+
+def approve_points_for_video(video, creator, config):
+    """指定した投稿のポイントを承認し、creator/video辞書を直接書き換える(単体承認・一括承認で共用)。
+
+    承認可能な状態(eligible_pending_approval)でなければ何もせずNoneを返す。
+    呼び出し側でCREATORS_LOCK+VIDEOS_LOCKの取得、save_creators/save_videosを行うこと。
+    """
+    # クライアント側の表示だけを信用せず、サーバー側で承認可能な状態か再検証する
+    status = get_points_status(video, creator, config)
+    if not status or status["state"] != "eligible_pending_approval":
+        return None
+
+    # amountはボーナス込みの合計(get_points_status内で計算済み)。ここで再計算せず
+    # 同じ値をそのまま使うことで、承認可否の判定に使った金額と実際に付与する金額が
+    # 食い違わないようにする。
+    amount = status["amount"]
+    bonus_applied = status.get("bonusEligible", False)
+
+    creator["points_balance"] = creator.get("points_balance", 0) + amount
+    creator.setdefault("points_history", []).append({
+        "delta": amount,
+        "reason": "upload_approved",
+        "content_id": video["id"],
+        "bonusApplied": bonus_applied,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+    video["points_awarded"] = True
+    video["points_awarded_amount"] = amount
+    video["points_awarded_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    video["bonus_points_applied"] = bonus_applied
+
+    return amount
 
 
 def load_config():
@@ -1628,6 +1663,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_approve_points()
+        elif path == "/api/creators/approve-all-points":
+            if self.require_auth():
+                return
+            self.handle_creators_approve_all_points()
         elif path == "/api/creators/adjust-points":
             if self.require_auth():
                 return
@@ -2831,35 +2870,51 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(404, {"ok": False, "error": "creator_not_found"})
                 return
 
-            # クライアント側の表示だけを信用せず、サーバー側で承認可能な状態か再検証する
-            status = get_points_status(video, creator, config)
-            if not status or status["state"] != "eligible_pending_approval":
+            amount = approve_points_for_video(video, creator, config)
+            if amount is None:
                 self.respond_json(400, {"ok": False, "error": "not_eligible"})
                 return
 
-            # amountはボーナス込みの合計(get_points_status内で計算済み)。ここで再計算せず
-            # 同じ値をそのまま使うことで、承認可否の判定に使った金額と実際に付与する金額が
-            # 食い違わないようにする。
-            amount = status["amount"]
-            bonus_applied = status.get("bonusEligible", False)
-
-            creator["points_balance"] = creator.get("points_balance", 0) + amount
-            creator.setdefault("points_history", []).append({
-                "delta": amount,
-                "reason": "upload_approved",
-                "content_id": content_id,
-                "bonusApplied": bonus_applied,
-                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            })
             save_creators(creators)
-
-            video["points_awarded"] = True
-            video["points_awarded_amount"] = amount
-            video["points_awarded_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            video["bonus_points_applied"] = bonus_applied
             save_videos(videos)
 
         self.respond_json(200, {"ok": True, "amount": amount, "amountYen": points_to_yen(amount)})
+
+    def handle_creators_approve_all_points(self):
+        # 両方のロックが必要な処理なので、デッドロック防止のため必ずCREATORS_LOCKを先に取る
+        with CREATORS_LOCK, VIDEOS_LOCK:
+            config = load_config()
+            videos = load_videos()
+            creators = load_creators()
+
+            approved = []
+            for video in videos:
+                if not video.get("owner_creator_id"):
+                    continue
+                creator = find_creator(creators, video["owner_creator_id"])
+                if not creator:
+                    continue
+                amount = approve_points_for_video(video, creator, config)
+                if amount is not None:
+                    approved.append({
+                        "contentId": video["id"],
+                        "creatorDisplayName": creator.get("display_name"),
+                        "amount": amount,
+                        "amountYen": points_to_yen(amount),
+                    })
+
+            if approved:
+                save_creators(creators)
+                save_videos(videos)
+
+        total_amount = sum(a["amount"] for a in approved)
+        self.respond_json(200, {
+            "ok": True,
+            "approvedCount": len(approved),
+            "totalAmount": total_amount,
+            "totalAmountYen": points_to_yen(total_amount),
+            "approved": approved,
+        })
 
     def handle_creators_adjust_points(self):
         content_length = int(self.headers.get("Content-Length", 0))

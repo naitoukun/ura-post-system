@@ -114,6 +114,14 @@
   <input id="videoSearchInput" type="search" placeholder="ファイル名・投稿者名・IDで絞り込み"
     class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
 
+  <div class="flex flex-col gap-1">
+    <button id="approveAllPointsBtn" type="button"
+      class="border border-teal-500 text-teal-600 rounded-lg py-2 text-sm font-bold hover:bg-teal-50">
+      承認待ちを一括承認する
+    </button>
+    <p id="approveAllPointsMsg" class="text-xs min-h-[1em] text-center"></p>
+  </div>
+
   <div id="videoListBox" class="flex flex-col gap-3">
     <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
   </div>
@@ -373,6 +381,8 @@
   const videoListBox= document.getElementById('videoListBox');
   const videoSearchInput = document.getElementById('videoSearchInput');
   const videoListMoreBtn = document.getElementById('videoListMoreBtn');
+  const approveAllPointsBtn = document.getElementById('approveAllPointsBtn');
+  const approveAllPointsMsg = document.getElementById('approveAllPointsMsg');
 
   const linkStatusBox = document.getElementById('linkStatusBox');
   const linkForm      = document.getElementById('linkForm');
@@ -1534,6 +1544,37 @@
   videoListMoreBtn.addEventListener('click', () => {
     videoVisibleCount += VIDEO_PAGE_SIZE;
     renderVideoList();
+  });
+
+  approveAllPointsBtn.addEventListener('click', () => {
+    if (!window.confirm('承認待ちの投稿をすべて承認し、ポイントを付与します。よろしいですか？')) return;
+
+    approveAllPointsBtn.disabled = true;
+    approveAllPointsMsg.textContent = '';
+    approveAllPointsMsg.className = 'text-xs min-h-[1em] text-center';
+
+    fetch('/api/creators/approve-all-points', { method: 'POST' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        approveAllPointsBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          approveAllPointsMsg.textContent = data.approvedCount
+            ? data.approvedCount + '件承認し、合計' + data.totalAmount.toLocaleString('ja-JP') + 'pt（' + data.totalAmountYen.toLocaleString('ja-JP') + '円分）付与しました。'
+            : '承認待ちの投稿はありませんでした。';
+          approveAllPointsMsg.classList.add('text-teal-600');
+          refreshVideoList();
+          refreshCreatorList();
+        } else {
+          approveAllPointsMsg.textContent = '一括承認に失敗しました（' + (data.error || status) + '）';
+          approveAllPointsMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        approveAllPointsBtn.disabled = false;
+        approveAllPointsMsg.textContent = '通信エラーが発生しました。';
+        approveAllPointsMsg.classList.add('text-rose-500');
+      });
   });
 
   function buildVideoCard(video) {

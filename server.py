@@ -185,6 +185,34 @@ def record_login_success(scope, ip):
     with LOGIN_ATTEMPTS_LOCK:
         LOGIN_ATTEMPTS.pop(key, None)
 
+
+# 視聴回数の水増し対策。同一IP+同一コンテンツからのアクセスは、直近24時間以内なら
+# 1回しかカウントしない(ページを何度再読み込みしても閲覧数が伸び続けないようにする)。
+# ログイン試行制限と同じくメモリ上のみで管理する簡易な仕組みで、サーバー再起動で
+# リセットされるが、閲覧数自体が既に「概算」である前提の機能なのでこれで十分とする。
+VIEW_DEDUP_LOCK = threading.Lock()
+VIEW_DEDUP = {}  # (video_id, ip) -> last_counted_epoch
+VIEW_DEDUP_WINDOW_SECONDS = 24 * 60 * 60
+
+
+def should_count_view(video_id, ip):
+    """このIPからのこのコンテンツへのアクセスを、閲覧数として数えるべきかを返す。
+
+    数えるべき(=直近のウィンドウ内に記録が無かった)場合はTrueを返し、同時に記録を更新する。
+    """
+    key = (video_id, ip)
+    now = time.time()
+    with VIEW_DEDUP_LOCK:
+        last_counted_at = VIEW_DEDUP.get(key)
+        if last_counted_at is not None and now - last_counted_at < VIEW_DEDUP_WINDOW_SECONDS:
+            return False
+        VIEW_DEDUP[key] = now
+        expired_keys = [k for k, t in VIEW_DEDUP.items() if now - t > VIEW_DEDUP_WINDOW_SECONDS]
+        for k in expired_keys:
+            del VIEW_DEDUP[k]
+        return True
+
+
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
 ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 
@@ -1259,9 +1287,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             # モザイク越しのロック画面が表示された回数を視聴回数としてカウントする
-            # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)
-            video["view_count"] = video.get("view_count", 0) + 1
-            save_videos(videos_list)
+            # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)。
+            # 同一IPからの短時間の連続アクセス(ページ再読み込み等)による水増しを防ぐため、
+            # 同一IP+同一コンテンツは直近24時間で1回しかカウントしない。
+            if should_count_view(requested_id, get_client_ip(self)):
+                video["view_count"] = video.get("view_count", 0) + 1
+                save_videos(videos_list)
 
         config = load_config()
         effective_ads = video.get("ads") or config["ads"]

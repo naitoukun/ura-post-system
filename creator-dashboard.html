@@ -457,14 +457,15 @@
 
   function pointsStatusLabel(ps) {
     if (!ps) return null;
+    const bonusSuffix = ps.bonusEligible ? '🎁ボーナス達成' : '';
     if (ps.state === 'collecting') {
-      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', tone: 'bg-slate-100 text-slate-500' };
+      return { text: '集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）' + bonusSuffix, tone: 'bg-slate-100 text-slate-500' };
     }
     if (ps.state === 'eligible_pending_approval') {
-      return { text: '承認待ち（+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', tone: 'bg-amber-50 text-amber-700' };
+      return { text: '承認待ち（+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）' + bonusSuffix, tone: 'bg-amber-50 text-amber-700' };
     }
     if (ps.state === 'awarded') {
-      return { text: '付与済み（+' + ps.amount + 'pt（' + ps.amountYen + '円分））', tone: 'bg-teal-50 text-teal-700' };
+      return { text: '付与済み（+' + ps.amount + 'pt（' + ps.amountYen + '円分））' + (ps.bonusApplied ? '🎁ボーナス込み' : ''), tone: 'bg-teal-50 text-teal-700' };
     }
     if (ps.state === 'not_eligible') {
       return { text: '対象外（閲覧数未達）', tone: 'bg-slate-100 text-slate-400' };

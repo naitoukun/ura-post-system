@@ -33,7 +33,7 @@
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
 - POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
-- POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数）の既定値更新（JSON）※要ログイン
+- POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数・ボーナス閲覧数閾値とボーナス付与量）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
 - POST /api/reset-og-image  OGP画像を同梱の既定画像に戻す（JSON）※要ログイン
 
@@ -273,6 +273,15 @@ DEFAULT_POINTS_PER_VIDEO_UPLOAD = 100
 DEFAULT_POINTS_PER_IMAGE_UPLOAD = 100
 DEFAULT_POINTS_VIEW_THRESHOLD = 10
 
+# 24時間以内の閲覧数がボーナス閾値(既定1000)を超えた投稿には、通常の付与ポイントに加えて
+# ボーナスポイントを上乗せする。判定は通常の閾値判定と同じく「24時間経過後の時点での
+# 累計閲覧数」で行う(厳密に24時間"以内"の閲覧だけを数えているわけではない点も既存の
+# 閾値判定と同じ)。ボーナス額は既定0(未設定)なので、管理画面で金額を設定するまでは
+# 何も変わらない(意図しない支払いが発生しないようにするための安全な既定値)。
+DEFAULT_BONUS_VIEW_THRESHOLD = 1000
+DEFAULT_BONUS_POINTS_VIDEO = 0
+DEFAULT_BONUS_POINTS_IMAGE = 0
+
 # ギフト券交換は最低このポイント数から申請可能(既定150000pt = 1500円分。100pt=1円で換算)。
 # サイト全体共通、管理画面(ポイント設定)で変更可能。
 DEFAULT_MIN_REDEMPTION_POINTS = 150000
@@ -365,7 +374,7 @@ def verify_password(password, salt_hex, expected_hash_hex):
 
 
 def get_effective_points_amount(video, creator, config):
-    """このコンテンツ(動画/画像)を承認した場合に付与されるポイント数を返す。
+    """このコンテンツ(動画/画像)を承認した場合に付与される通常ポイント数を返す(ボーナス抜き)。
 
     クリエイター側に動画/画像それぞれの個別上書き設定があればそれを、
     無ければサイト全体の既定値(config)を使う。
@@ -377,29 +386,59 @@ def get_effective_points_amount(video, creator, config):
     return override if override is not None else config.get("points_per_video_upload", DEFAULT_POINTS_PER_VIDEO_UPLOAD)
 
 
+def get_effective_bonus_points_amount(video, config):
+    """ボーナス閾値を超えた場合に追加で付与されるボーナスポイント数を返す。
+
+    個別上書きは無く、サイト全体の既定値のみ(0なら実質ボーナス無効)。
+    """
+    if video.get("content_type") == "image":
+        return config.get("bonus_points_image", DEFAULT_BONUS_POINTS_IMAGE)
+    return config.get("bonus_points_video", DEFAULT_BONUS_POINTS_VIDEO)
+
+
 def get_points_status(video, creator, config):
     """クリエイター投稿1件の、ポイント付与に関する現在の状態を返す。
 
     管理者自身のアップロード(owner_creator_id無し)には適用されないのでNoneを返す。
     get_time_limit_status と同様、DBには「承認済みかどうか」しか保存せず、
     それ以外の状態(集計中/対象外等)は呼ばれるたびに計算するだけにする。
+    ボーナス判定(24時間以内の閲覧数がbonus_view_thresholdを超えたか)も通常の
+    閾値判定と同じタイミング(24時間経過後の累計閲覧数)で行い、amount/amountYenには
+    ボーナス込みの合計を入れる。
     """
     if not video.get("owner_creator_id"):
         return None
     if video.get("points_awarded"):
         amount = video.get("points_awarded_amount")
-        return {"state": "awarded", "amount": amount, "amountYen": points_to_yen(amount), "viewCount": video.get("view_count", 0)}
+        return {
+            "state": "awarded",
+            "amount": amount,
+            "amountYen": points_to_yen(amount),
+            "viewCount": video.get("view_count", 0),
+            "bonusApplied": bool(video.get("bonus_points_applied")),
+        }
 
     window_end = video.get("uploaded_at_epoch", 0) + POINTS_WINDOW_SECONDS
     view_count = video.get("view_count", 0)
     threshold = config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
-    amount = get_effective_points_amount(video, creator, config)
+    bonus_threshold = config.get("bonus_view_threshold", DEFAULT_BONUS_VIEW_THRESHOLD)
+    bonus_eligible = view_count >= bonus_threshold
+    bonus_amount = get_effective_bonus_points_amount(video, config) if bonus_eligible else 0
+    amount = get_effective_points_amount(video, creator, config) + bonus_amount
     amount_yen = points_to_yen(amount)
 
     if time.time() < window_end:
-        return {"state": "collecting", "viewCount": view_count, "threshold": threshold, "windowEndsAt": window_end, "amount": amount, "amountYen": amount_yen}
+        return {
+            "state": "collecting", "viewCount": view_count, "threshold": threshold,
+            "windowEndsAt": window_end, "amount": amount, "amountYen": amount_yen,
+            "bonusThreshold": bonus_threshold, "bonusEligible": bonus_eligible, "bonusAmount": bonus_amount,
+        }
     if view_count >= threshold:
-        return {"state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold, "amount": amount, "amountYen": amount_yen}
+        return {
+            "state": "eligible_pending_approval", "viewCount": view_count, "threshold": threshold,
+            "amount": amount, "amountYen": amount_yen,
+            "bonusThreshold": bonus_threshold, "bonusEligible": bonus_eligible, "bonusAmount": bonus_amount,
+        }
     return {"state": "not_eligible", "viewCount": view_count, "threshold": threshold}
 
 
@@ -414,6 +453,9 @@ def load_config():
             "points_per_image_upload": DEFAULT_POINTS_PER_IMAGE_UPLOAD,
             "points_view_threshold": DEFAULT_POINTS_VIEW_THRESHOLD,
             "min_redemption_points": DEFAULT_MIN_REDEMPTION_POINTS,
+            "bonus_view_threshold": DEFAULT_BONUS_VIEW_THRESHOLD,
+            "bonus_points_video": DEFAULT_BONUS_POINTS_VIDEO,
+            "bonus_points_image": DEFAULT_BONUS_POINTS_IMAGE,
             "content_page_ad_zone_id_mobile": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE,
             "content_page_ad_zone_id_desktop": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP,
         }
@@ -427,6 +469,9 @@ def load_config():
     config.setdefault("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD)
     config.setdefault("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
     config.setdefault("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)
+    config.setdefault("bonus_view_threshold", DEFAULT_BONUS_VIEW_THRESHOLD)
+    config.setdefault("bonus_points_video", DEFAULT_BONUS_POINTS_VIDEO)
+    config.setdefault("bonus_points_image", DEFAULT_BONUS_POINTS_IMAGE)
     # 旧: PC/スマホ分離前の単一ゾーンID設定からの移行(既存の値はモバイル用として引き継ぐ)
     legacy_zone_id = config.pop("content_page_ad_zone_id", None)
     config.setdefault("content_page_ad_zone_id_mobile", legacy_zone_id or DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE)
@@ -1142,6 +1187,9 @@ class Handler(BaseHTTPRequestHandler):
             "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
             "minRedemptionPoints": config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS),
             "minRedemptionPointsYen": points_to_yen(config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)),
+            "bonusViewThreshold": config.get("bonus_view_threshold", DEFAULT_BONUS_VIEW_THRESHOLD),
+            "bonusPointsVideo": config.get("bonus_points_video", DEFAULT_BONUS_POINTS_VIDEO),
+            "bonusPointsImage": config.get("bonus_points_image", DEFAULT_BONUS_POINTS_IMAGE),
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
         }).encode("utf-8")
@@ -1728,15 +1776,24 @@ class Handler(BaseHTTPRequestHandler):
         points_per_image_upload = data.get("pointsPerImageUpload")
         points_view_threshold = data.get("pointsViewThreshold")
         min_redemption_points = data.get("minRedemptionPoints")
+        bonus_view_threshold = data.get("bonusViewThreshold")
+        bonus_points_video = data.get("bonusPointsVideo")
+        bonus_points_image = data.get("bonusPointsImage")
 
         def is_positive_int(value):
             return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+        def is_nonnegative_int(value):
+            return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
         if (
             not is_positive_int(points_per_video_upload)
             or not is_positive_int(points_per_image_upload)
             or not is_positive_int(points_view_threshold)
             or not is_positive_int(min_redemption_points)
+            or not is_positive_int(bonus_view_threshold)
+            or not is_nonnegative_int(bonus_points_video)
+            or not is_nonnegative_int(bonus_points_image)
         ):
             self.respond_json(400, {"ok": False, "error": "invalid_points_config"})
             return
@@ -1746,6 +1803,9 @@ class Handler(BaseHTTPRequestHandler):
         config["points_per_image_upload"] = points_per_image_upload
         config["points_view_threshold"] = points_view_threshold
         config["min_redemption_points"] = min_redemption_points
+        config["bonus_view_threshold"] = bonus_view_threshold
+        config["bonus_points_video"] = bonus_points_video
+        config["bonus_points_image"] = bonus_points_image
         save_config(config)
 
         self.respond_json(200, {
@@ -1754,6 +1814,9 @@ class Handler(BaseHTTPRequestHandler):
             "pointsPerImageUpload": points_per_image_upload,
             "pointsViewThreshold": points_view_threshold,
             "minRedemptionPoints": min_redemption_points,
+            "bonusViewThreshold": bonus_view_threshold,
+            "bonusPointsVideo": bonus_points_video,
+            "bonusPointsImage": bonus_points_image,
         })
 
     def handle_set_video_ads(self):
@@ -2738,13 +2801,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(400, {"ok": False, "error": "not_eligible"})
                 return
 
-            amount = get_effective_points_amount(video, creator, config)
+            # amountはボーナス込みの合計(get_points_status内で計算済み)。ここで再計算せず
+            # 同じ値をそのまま使うことで、承認可否の判定に使った金額と実際に付与する金額が
+            # 食い違わないようにする。
+            amount = status["amount"]
+            bonus_applied = status.get("bonusEligible", False)
 
             creator["points_balance"] = creator.get("points_balance", 0) + amount
             creator.setdefault("points_history", []).append({
                 "delta": amount,
                 "reason": "upload_approved",
                 "content_id": content_id,
+                "bonusApplied": bonus_applied,
                 "at": time.strftime("%Y-%m-%d %H:%M:%S"),
             })
             save_creators(creators)
@@ -2752,6 +2820,7 @@ class Handler(BaseHTTPRequestHandler):
             video["points_awarded"] = True
             video["points_awarded_amount"] = amount
             video["points_awarded_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            video["bonus_points_applied"] = bonus_applied
             save_videos(videos)
 
         self.respond_json(200, {"ok": True, "amount": amount, "amountYen": points_to_yen(amount)})

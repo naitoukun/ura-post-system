@@ -153,6 +153,22 @@
       <input type="number" name="minRedemptionPoints" required min="1" step="1" placeholder="150000"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
+    <p class="text-xs text-slate-400 border-t border-slate-100 pt-3">24時間以内の閲覧数がこの数を超えたら、通常の付与ポイントに加えてボーナスポイントを上乗せします。ボーナス分を0にすると無効になります。</p>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">ボーナス閲覧数の閾値</span>
+      <input type="number" name="bonusViewThreshold" required min="1" step="1" placeholder="1000"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">動画のボーナスポイント（0で無効）</span>
+      <input type="number" name="bonusPointsVideo" required min="0" step="1" placeholder="0"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">画像のボーナスポイント（0で無効）</span>
+      <input type="number" name="bonusPointsImage" required min="0" step="1" placeholder="0"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
     <p class="text-xs text-slate-400">個別の子ごとに変えたい場合は、下の「女の子アカウント管理」の一覧から個別設定できます。</p>
     <button type="submit" id="pointsSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
       更新
@@ -562,13 +578,20 @@
     fetch('/site-config', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
+        const bonusText = (data.bonusPointsVideo || data.bonusPointsImage)
+          ? `ボーナス: 閲覧数${data.bonusViewThreshold}超で動画+${data.bonusPointsVideo}pt・画像+${data.bonusPointsImage}pt`
+          : 'ボーナス: 未設定（無効）';
         pointsStatusBox.textContent =
           `既定の付与ポイント: 動画${data.pointsPerVideoUpload}pt / 画像${data.pointsPerImageUpload}pt / `
-          + `24時間以内の最低閲覧数: ${data.pointsViewThreshold} / ギフト券交換の最低申請ポイント数: ${data.minRedemptionPoints.toLocaleString('ja-JP')}pt（${data.minRedemptionPointsYen.toLocaleString('ja-JP')}円分）`;
+          + `24時間以内の最低閲覧数: ${data.pointsViewThreshold} / ギフト券交換の最低申請ポイント数: ${data.minRedemptionPoints.toLocaleString('ja-JP')}pt（${data.minRedemptionPointsYen.toLocaleString('ja-JP')}円分） / `
+          + bonusText;
         pointsForm.elements['pointsPerVideoUpload'].value = data.pointsPerVideoUpload;
         pointsForm.elements['pointsPerImageUpload'].value = data.pointsPerImageUpload;
         pointsForm.elements['pointsViewThreshold'].value = data.pointsViewThreshold;
         pointsForm.elements['minRedemptionPoints'].value = data.minRedemptionPoints;
+        pointsForm.elements['bonusViewThreshold'].value = data.bonusViewThreshold;
+        pointsForm.elements['bonusPointsVideo'].value = data.bonusPointsVideo;
+        pointsForm.elements['bonusPointsImage'].value = data.bonusPointsImage;
       })
       .catch(() => {
         pointsStatusBox.textContent = '状態の取得に失敗しました。';
@@ -591,6 +614,9 @@
         pointsPerImageUpload: Number(formData.get('pointsPerImageUpload')),
         pointsViewThreshold: Number(formData.get('pointsViewThreshold')),
         minRedemptionPoints: Number(formData.get('minRedemptionPoints')),
+        bonusViewThreshold: Number(formData.get('bonusViewThreshold')),
+        bonusPointsVideo: Number(formData.get('bonusPointsVideo')),
+        bonusPointsImage: Number(formData.get('bonusPointsImage')),
       }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
@@ -1564,12 +1590,13 @@
     }
     const ps = video.pointsStatus;
     if (ps) {
+      const bonusSuffix = ps.bonusEligible ? '🎁ボーナス達成' : '';
       if (ps.state === 'collecting') {
-        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', 'bg-slate-100 text-slate-500');
+        addBadge('ポイント集計中（' + ps.viewCount + ' / ' + ps.threshold + '閲覧・承認で+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）' + bonusSuffix, 'bg-slate-100 text-slate-500');
       } else if (ps.state === 'eligible_pending_approval') {
-        addBadge('ポイント承認待ち（+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）', 'bg-rose-50 text-rose-600');
+        addBadge('ポイント承認待ち（+' + ps.amount + 'pt（' + ps.amountYen + '円分）予定）' + bonusSuffix, 'bg-rose-50 text-rose-600');
       } else if (ps.state === 'awarded') {
-        addBadge('ポイント付与済み（+' + ps.amount + 'pt（' + ps.amountYen + '円分））', 'bg-teal-50 text-teal-700');
+        addBadge('ポイント付与済み（+' + ps.amount + 'pt（' + ps.amountYen + '円分））' + (ps.bonusApplied ? '🎁ボーナス込み' : ''), 'bg-teal-50 text-teal-700');
       } else if (ps.state === 'not_eligible') {
         addBadge('ポイント対象外（閲覧数未達）', 'bg-slate-100 text-slate-400');
       }
@@ -1633,7 +1660,7 @@
     if (ps && ps.state === 'eligible_pending_approval') {
       const approveBtn = document.createElement('button');
       approveBtn.type = 'button';
-      approveBtn.textContent = '承認して+' + ps.amount + 'pt（' + ps.amountYen + '円分）付与';
+      approveBtn.textContent = '承認して+' + ps.amount + 'pt（' + ps.amountYen + '円分）付与' + (ps.bonusEligible ? '（ボーナス込み）' : '');
       approveBtn.className = 'border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
       approveBtn.addEventListener('click', () => {
         approveBtn.disabled = true;

@@ -568,6 +568,7 @@
     });
     linkRow.appendChild(copyBtn);
     body.appendChild(linkRow);
+    body.appendChild(buildThumbnailSection(item));
     body.appendChild(buildCtaTextSection(item));
 
     const deleteBtn = document.createElement('button');
@@ -599,6 +600,116 @@
 
     card.appendChild(body);
     return card;
+  }
+
+  function buildThumbnailSection(item) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = 'サムネイルの設定' + (item.hasThumbnail ? '（設定済み・変更する）' : '（未設定）');
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const preview = document.createElement('img');
+    preview.className = 'w-full max-w-[200px] rounded-lg border border-slate-100 object-cover';
+    preview.alt = '現在のサムネイル';
+    if (item.hasThumbnail) {
+      preview.src = item.thumbnailUrl + '?t=' + Date.now();
+    } else {
+      preview.style.display = 'none';
+    }
+    body.appendChild(preview);
+
+    const currentLabel = document.createElement('p');
+    currentLabel.className = 'text-[11px] text-slate-400';
+    currentLabel.textContent = item.hasThumbnail
+      ? '現在のサムネイルです。未設定の場合は動画のプレビュー画像等が使われます。'
+      : '未設定です。設定しない場合は動画のプレビュー画像等が使われます。';
+    body.appendChild(currentLabel);
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/png,image/jpeg,image/webp';
+    fileInput.className = 'text-xs';
+    body.appendChild(fileInput);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-2';
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = '設定する';
+    applyBtn.className = 'flex-1 border border-teal-500 text-teal-600 rounded-lg py-1.5 text-xs font-medium hover:bg-teal-50';
+    applyBtn.addEventListener('click', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        msg.textContent = '画像を選択してください。';
+        msg.className = 'text-xs text-rose-500';
+        return;
+      }
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+      const formData = new FormData();
+      formData.append('id', item.id);
+      formData.append('thumbnail', file);
+      fetch('/api/creator/content/set-thumbnail', { method: 'POST', body: formData })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshContentList();
+          } else {
+            msg.textContent = '設定に失敗しました（' + (data.error || status) + '）';
+            msg.className = 'text-xs text-rose-500';
+          }
+        })
+        .catch(() => {
+          msg.textContent = '通信エラーが発生しました。';
+          msg.className = 'text-xs text-rose-500';
+        });
+    });
+    btnRow.appendChild(applyBtn);
+
+    if (item.hasThumbnail) {
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.textContent = '解除する';
+      resetBtn.className = 'flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-xs font-medium hover:bg-slate-50';
+      resetBtn.addEventListener('click', () => {
+        fetch('/api/creator/content/reset-thumbnail', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id }),
+        })
+          .then((res) => res.json().then((data) => ({ status: res.status, data })))
+          .then(({ status, data }) => {
+            if (redirectIfUnauthenticated(status)) return;
+            if (status === 200 && data.ok) {
+              refreshContentList();
+            } else {
+              msg.textContent = '解除に失敗しました（' + (data.error || status) + '）';
+              msg.className = 'text-xs text-rose-500';
+            }
+          })
+          .catch(() => {
+            msg.textContent = '通信エラーが発生しました。';
+            msg.className = 'text-xs text-rose-500';
+          });
+      });
+      btnRow.appendChild(resetBtn);
+    }
+
+    body.appendChild(btnRow);
+    wrap.appendChild(body);
+    return wrap;
   }
 
   function buildCtaTextSection(item) {

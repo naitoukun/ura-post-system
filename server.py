@@ -1709,6 +1709,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_creator_set_cta_text()
+        elif path == "/api/creator/content/set-thumbnail":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_set_thumbnail()
+        elif path == "/api/creator/content/reset-thumbnail":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_reset_thumbnail()
         elif path == "/api/creator/request-redemption":
             if self.require_creator_auth():
                 return
@@ -2479,6 +2487,88 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
+    def handle_creator_set_thumbnail(self):
+        creator_id = self.get_creator_id()
+        content_type_header = self.headers.get("Content-Type", "")
+        boundary_match = re.search(r"boundary=(.+)", content_type_header)
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        if not content_type_header.startswith("multipart/form-data") or not boundary_match:
+            self.respond_json(400, {"ok": False, "error": "invalid_content_type"})
+            return
+
+        if content_length <= 0 or content_length > MAX_OG_IMAGE_BYTES:
+            self.respond_json(413, {"ok": False, "error": "file_too_large"})
+            return
+
+        boundary = boundary_match.group(1).strip('"').encode("utf-8")
+        body = self.rfile.read(content_length)
+        fields, files = parse_multipart(body, boundary)
+
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == fields.get("id")), None)
+            # 他のクリエイターや管理者本人のコンテンツを変更できないよう、所有者一致を必ず確認する
+            if not video or video.get("owner_creator_id") != creator_id:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            image_file = first_file(files, "thumbnail")
+            if not image_file:
+                self.respond_json(400, {"ok": False, "error": "missing_image_field"})
+                return
+
+            ext = os.path.splitext(image_file["filename"] or "")[1].lower()
+            if ext not in OG_IMAGE_ALLOWED_EXTENSIONS:
+                self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
+                return
+
+            # 拡張子が変わった場合に前のサムネイルが残らないよう、既存分は一旦削除する
+            old_filename = video.get("og_image_filename")
+            if old_filename:
+                old_path = os.path.join(UPLOAD_DIR, old_filename)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+
+            new_filename = "thumb_" + video["id"] + ext
+            with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
+                f.write(image_file["content"])
+
+            video["og_image_filename"] = new_filename
+            save_videos(videos)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_creator_reset_thumbnail(self):
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video or video.get("owner_creator_id") != creator_id:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            old_filename = video.get("og_image_filename")
+            if old_filename:
+                old_path = os.path.join(UPLOAD_DIR, old_filename)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            video.pop("og_image_filename", None)
+            save_videos(videos)
+
+        self.respond_json(200, {"ok": True})
+
     def handle_creator_submit_id(self):
         """クリエイター自身による年齢確認用の身分証提出(multipart/form-data)。
 
@@ -2768,6 +2858,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ctaLinkUrl": v.get("cta_link_url"),
                 "effectiveCtaButtonText": get_effective_cta(v, config, creator)["premiumButtonText"],
                 "effectiveCtaLink": get_effective_cta(v, config, creator)["premiumLink"],
+                "hasThumbnail": bool(v.get("og_image_filename")),
+                "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
             }
             for v in own_videos
         ]

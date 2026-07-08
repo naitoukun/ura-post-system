@@ -2461,8 +2461,11 @@ class Handler(BaseHTTPRequestHandler):
                     os.remove(old_path)
 
             new_filename = "iddoc_" + creator_id + ext
-            with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
+            new_path = os.path.join(UPLOAD_DIR, new_filename)
+            with open(new_path, "wb") as f:
                 f.write(id_file["content"])
+            # 本人確認書類という機微情報のため、所有者(サーバープロセス)以外は読めないようにする
+            os.chmod(new_path, 0o600)
 
             creator["id_document_filename"] = new_filename
             creator["id_verification_status"] = "pending"
@@ -3115,6 +3118,19 @@ class Handler(BaseHTTPRequestHandler):
         content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
         self.serve_file(path, content_type, extra_headers={"Cache-Control": "no-store"})
 
+    def _delete_id_document_file(self, creator):
+        """審査(承認/却下)が終わった身分証の画像そのものは残さず削除する。
+
+        個人情報(本人確認書類)を必要以上に長く保持しないための安全対策。
+        「審査した」という事実(状態・日時・却下理由)はcreators.json側に残る。
+        """
+        filename = creator.get("id_document_filename")
+        if filename:
+            path = os.path.join(UPLOAD_DIR, filename)
+            if os.path.exists(path):
+                os.remove(path)
+        creator["id_document_filename"] = None
+
     def handle_creators_approve_id(self):
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length <= 0 or content_length > 2_000:
@@ -3139,6 +3155,7 @@ class Handler(BaseHTTPRequestHandler):
             creator["id_verification_status"] = "approved"
             creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             creator["id_rejection_reason"] = None
+            self._delete_id_document_file(creator)
             save_creators(creators)
 
         self.respond_json(200, {"ok": True, "idVerificationStatus": "approved"})
@@ -3171,6 +3188,7 @@ class Handler(BaseHTTPRequestHandler):
             creator["id_verification_status"] = "rejected"
             creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             creator["id_rejection_reason"] = reason
+            self._delete_id_document_file(creator)
             save_creators(creators)
 
         self.respond_json(200, {"ok": True, "idVerificationStatus": "rejected", "reason": reason})

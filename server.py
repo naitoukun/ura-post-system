@@ -31,7 +31,7 @@
 - POST /api/videos/reset-thumbnail  動画ごとの個別サムネイルを解除しサイト既定画像に戻す（JSON）※要ログイン
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
-- POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンIDの更新・解除（JSON）※要ログイン
+- POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
 - POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
@@ -243,8 +243,9 @@ MAX_AD_CODE_LENGTH = 2000
 
 # アンロック後の視聴ページ(動画再生ページ・画像ページ両方)に常に表示するバナー広告。
 # 上記ad1/ad2(アンロック待ちの間だけ表示するゲート広告)とは別枠で、コンテンツ種別を問わず
-# 同じゾーンIDを使う。空欄にすると非表示になる。
-DEFAULT_CONTENT_PAGE_AD_ZONE_ID = "5968878"
+# 同じゾーンIDを使う。PC/スマホでゾーンIDを出し分けられるよう別々に持つ。空欄にすると非表示になる。
+DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE = "5968878"
+DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP = "5968882"
 MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH = 100
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -413,7 +414,8 @@ def load_config():
             "points_per_image_upload": DEFAULT_POINTS_PER_IMAGE_UPLOAD,
             "points_view_threshold": DEFAULT_POINTS_VIEW_THRESHOLD,
             "min_redemption_points": DEFAULT_MIN_REDEMPTION_POINTS,
-            "content_page_ad_zone_id": DEFAULT_CONTENT_PAGE_AD_ZONE_ID,
+            "content_page_ad_zone_id_mobile": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE,
+            "content_page_ad_zone_id_desktop": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -425,7 +427,10 @@ def load_config():
     config.setdefault("points_per_image_upload", DEFAULT_POINTS_PER_IMAGE_UPLOAD)
     config.setdefault("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD)
     config.setdefault("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)
-    config.setdefault("content_page_ad_zone_id", DEFAULT_CONTENT_PAGE_AD_ZONE_ID)
+    # 旧: PC/スマホ分離前の単一ゾーンID設定からの移行(既存の値はモバイル用として引き継ぐ)
+    legacy_zone_id = config.pop("content_page_ad_zone_id", None)
+    config.setdefault("content_page_ad_zone_id_mobile", legacy_zone_id or DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE)
+    config.setdefault("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP)
     return config
 
 
@@ -1137,7 +1142,8 @@ class Handler(BaseHTTPRequestHandler):
             "pointsViewThreshold": config.get("points_view_threshold", DEFAULT_POINTS_VIEW_THRESHOLD),
             "minRedemptionPoints": config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS),
             "minRedemptionPointsYen": points_to_yen(config.get("min_redemption_points", DEFAULT_MIN_REDEMPTION_POINTS)),
-            "contentPageAdZoneId": config.get("content_page_ad_zone_id", DEFAULT_CONTENT_PAGE_AD_ZONE_ID),
+            "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
+            "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1226,7 +1232,8 @@ class Handler(BaseHTTPRequestHandler):
             "timeLimit": get_time_limit_status(video),
             "premiumLink": cta["premiumLink"],
             "premiumButtonText": cta["premiumButtonText"],
-            "contentPageAdZoneId": config.get("content_page_ad_zone_id", DEFAULT_CONTENT_PAGE_AD_ZONE_ID),
+            "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
+            "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
         })
 
     def handle_serve_video(self, video_id):
@@ -1665,16 +1672,22 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        zone_id, error = validate_content_page_ad_zone_id(data.get("zoneId"))
+        zone_id_mobile, error = validate_content_page_ad_zone_id(data.get("zoneIdMobile"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        zone_id_desktop, error = validate_content_page_ad_zone_id(data.get("zoneIdDesktop"))
         if error:
             self.respond_json(400, {"ok": False, "error": error})
             return
 
         config = load_config()
-        config["content_page_ad_zone_id"] = zone_id
+        config["content_page_ad_zone_id_mobile"] = zone_id_mobile
+        config["content_page_ad_zone_id_desktop"] = zone_id_desktop
         save_config(config)
 
-        self.respond_json(200, {"ok": True, "zoneId": zone_id})
+        self.respond_json(200, {"ok": True, "zoneIdMobile": zone_id_mobile, "zoneIdDesktop": zone_id_desktop})
 
     def handle_set_ads(self):
         content_length = int(self.headers.get("Content-Length", 0))

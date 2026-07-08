@@ -270,8 +270,14 @@
 
   <form id="contentPageAdForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">広告ゾーンID（空欄で非表示）</span>
-      <input type="text" name="zoneId" maxlength="100" placeholder="例: 5968878"
+      <span class="text-sm font-medium text-slate-700">PC用の広告ゾーンID（空欄で非表示）</span>
+      <input type="text" name="zoneIdDesktop" maxlength="100" placeholder="例: 5968882"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">スマホ用の広告ゾーンID（空欄で非表示）</span>
+      <input type="text" name="zoneIdMobile" maxlength="100" placeholder="例: 5968878"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
 
@@ -1248,10 +1254,12 @@
     fetch('/site-config', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        contentPageAdStatusBox.textContent = data.contentPageAdZoneId
-          ? `現在のゾーンID: ${data.contentPageAdZoneId}`
-          : '現在は非表示（未設定）です。';
-        contentPageAdForm.elements.zoneId.value = data.contentPageAdZoneId || '';
+        const parts = [];
+        parts.push(data.contentPageAdZoneIdDesktop ? `PC: ${data.contentPageAdZoneIdDesktop}` : 'PC: 非表示');
+        parts.push(data.contentPageAdZoneIdMobile ? `スマホ: ${data.contentPageAdZoneIdMobile}` : 'スマホ: 非表示');
+        contentPageAdStatusBox.textContent = parts.join(' / ');
+        contentPageAdForm.elements.zoneIdDesktop.value = data.contentPageAdZoneIdDesktop || '';
+        contentPageAdForm.elements.zoneIdMobile.value = data.contentPageAdZoneIdMobile || '';
       })
       .catch(() => {
         contentPageAdStatusBox.textContent = '状態の取得に失敗しました。';
@@ -1264,19 +1272,22 @@
     contentPageAdResultMsg.className = 'text-sm';
     contentPageAdSubmitBtn.disabled = true;
 
-    const zoneId = new FormData(contentPageAdForm).get('zoneId');
+    const formData = new FormData(contentPageAdForm);
 
     fetch('/api/set-content-page-ad', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zoneId: zoneId }),
+      body: JSON.stringify({
+        zoneIdDesktop: formData.get('zoneIdDesktop'),
+        zoneIdMobile: formData.get('zoneIdMobile'),
+      }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
       .then(({ status, data }) => {
         contentPageAdSubmitBtn.disabled = false;
         if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
-          contentPageAdResultMsg.textContent = data.zoneId ? `更新しました: ${data.zoneId}` : '非表示にしました。';
+          contentPageAdResultMsg.textContent = '更新しました。';
           contentPageAdResultMsg.classList.add('text-teal-600');
           refreshContentPageAdStatus();
         } else {

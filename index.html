@@ -215,10 +215,10 @@
       ♥ 【ファン限定】Fantia特設ページへ ♥
     </a>
 
-    <!-- 視聴ページ(動画・画像共通)のバナー広告。ゾーンIDはサーバー側の設定から差し込む -->
-    <div id="contentPageAdWrap" class="hidden-el w-full">
-      <ins id="contentPageAdIns" class="eas6a97888e14" data-zoneid=""></ins>
-    </div>
+    <!-- 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンIDが異なるため、
+         判定した方の<ins>だけをJS側で動的に生成する(両方を置いて片方をCSSで隠すと、
+         隠した方にも広告リクエストが飛んでしまうため)。 -->
+    <div id="contentPageAdWrap" class="hidden-el w-full"></div>
   </div>
 
   <!-- フッター（サイト実態と一致する表記） -->
@@ -268,7 +268,8 @@
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
-  const contentPageAdIns = document.getElementById('contentPageAdIns');
+  // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
+  const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
   const teaserVideo = document.getElementById('teaserVideo');
   const teaserImage = document.getElementById('teaserImage');
   const teaserCanvas= document.getElementById('teaserCanvas');
@@ -509,9 +510,16 @@
     stopTeaserPreview();
 
     videoInfoPromise.then((info) => {
-      // 視聴ページ(動画・画像共通)のバナー広告。ゾーンID未設定(空欄)なら非表示のまま。
-      if (info.contentPageAdZoneId) {
-        contentPageAdIns.setAttribute('data-zoneid', info.contentPageAdZoneId);
+      // 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンID・タグが異なるため、
+      // 判定した方の<ins>だけを生成する(両方は作らない=片方だけに広告リクエストを飛ばす)。
+      const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
+      const contentPageAdZoneId = isDesktopAd ? info.contentPageAdZoneIdDesktop : info.contentPageAdZoneIdMobile;
+      if (contentPageAdZoneId) {
+        const ins = document.createElement('ins');
+        ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';
+        ins.setAttribute('data-zoneid', contentPageAdZoneId);
+        contentPageAdWrap.innerHTML = '';
+        contentPageAdWrap.appendChild(ins);
         contentPageAdWrap.classList.remove('hidden-el');
         (window.AdProvider = window.AdProvider || []).push({ serve: {} });
       }
@@ -576,7 +584,8 @@
           timeLimit: status.timeLimit,
           premiumLink: status.premiumLink,
           premiumButtonText: status.premiumButtonText,
-          contentPageAdZoneId: status.contentPageAdZoneId,
+          contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
+          contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
         };
       })
       .catch(() => ({ linkRequired: true }));

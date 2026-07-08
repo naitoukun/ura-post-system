@@ -84,6 +84,7 @@ TODO: 本番運用前に以下を必ず対応すること
 """
 
 import base64
+import datetime
 import hmac
 import hashlib
 import html
@@ -98,6 +99,10 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
+# 生年月日のような「承認後も保持し続ける個人情報」の暗号化にのみ使う。他は引き続き
+# 標準ライブラリのみで完結させている(このプロジェクト唯一の外部依存)。
+from cryptography.fernet import Fernet, InvalidToken
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Render等では永続ディスクをこのフォルダにマウントする想定。
 # config.json・videos.json・動画本体をすべてこの下に置くことで、
@@ -111,6 +116,27 @@ CONFIG_PATH = os.path.join(UPLOAD_DIR, "config.json")
 UPLOAD_PASSPHRASE = os.environ.get("UPLOAD_PASSPHRASE", "change-me-please")
 # ローカル確認用のダミー秘密鍵。Google Authenticator等に手入力で登録して試せる。
 TOTP_SECRET = os.environ.get("TOTP_SECRET", "TUGSIULMQWTNMATI")
+
+# クリエイターの生年月日(年齢確認の承認後も保持する個人情報)を暗号化して保存するための鍵。
+# 本番ではVPSの環境変数 PII_ENCRYPTION_KEY で上書きすること(systemdのEnvironment=で設定済み)。
+# ここに書かれているのはローカル動作確認用の仮の値で、本番用の鍵とは別物。
+PII_ENCRYPTION_KEY = os.environ.get("PII_ENCRYPTION_KEY", "oNiALWHFa4gZOnQfEn94vNQRvHSpmYPWqX4pwBEjaiQ=")
+_pii_fernet = Fernet(PII_ENCRYPTION_KEY.encode("ascii"))
+
+
+def encrypt_pii(plaintext):
+    """個人情報の文字列をFernet(AES-CBC+HMAC)で暗号化し、保存用の文字列として返す。"""
+    return _pii_fernet.encrypt(plaintext.encode("utf-8")).decode("ascii")
+
+
+def decrypt_pii(token):
+    """encrypt_piiで暗号化した文字列を復号する。改ざん・鍵不一致等で失敗した場合はNoneを返す。"""
+    if not token:
+        return None
+    try:
+        return _pii_fernet.decrypt(token.encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, TypeError):
+        return None
 
 SESSION_COOKIE_NAME = "sv_session"
 SESSION_DURATION_SECONDS = 4 * 60 * 60  # 4時間
@@ -238,6 +264,46 @@ MAX_OG_IMAGE_BYTES = 5 * 1024 * 1024  # 5MB
 ID_DOCUMENT_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 MAX_ID_DOCUMENT_BYTES = 10 * 1024 * 1024  # 10MB
 MAX_ID_REJECTION_REASON_LENGTH = 300
+# 書類の種類は管理者が承認時に写真と付け合わせて確認するための表示用ラベル。
+# サーバー側の値の妥当性チェック以外の意味は持たせない(自己申告のまま保持する)。
+ID_DOCUMENT_TYPES = {
+    "drivers_license": "運転免許証",
+    "passport": "パスポート",
+    "mynumber_card": "マイナンバーカード",
+    "residence_card": "在留カード",
+    "other": "その他の公的書類",
+}
+MIN_CREATOR_AGE_YEARS = 18
+
+
+def validate_id_document_type(value):
+    return value if value in ID_DOCUMENT_TYPES else None
+
+
+def validate_date_of_birth(value):
+    """"YYYY-MM-DD"形式かつ18歳以上に相当する日付であることを検証する。不正ならNoneを返す。"""
+    if not value or not re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+        return None
+    try:
+        dob = datetime.date.fromisoformat(value)
+    except ValueError:
+        return None
+    today = datetime.date.today()
+    if dob > today:
+        return None
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    if age < MIN_CREATOR_AGE_YEARS or age > 120:
+        return None
+    return value
+
+
+def calculate_age(date_of_birth_str):
+    try:
+        dob = datetime.date.fromisoformat(date_of_birth_str)
+    except (ValueError, TypeError):
+        return None
+    today = datetime.date.today()
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 # og:image等はSNS側のクローラーが絶対URLで取得するため、公開ドメインを固定で持っておく。
 # 別ドメインで動作確認する場合は環境変数で上書きできるようにしておく。
 PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://ura-post.com")
@@ -2446,6 +2512,16 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
             return
 
+        document_type = validate_id_document_type(fields.get("documentType"))
+        if not document_type:
+            self.respond_json(400, {"ok": False, "error": "invalid_document_type"})
+            return
+
+        date_of_birth = validate_date_of_birth(fields.get("dateOfBirth"))
+        if not date_of_birth:
+            self.respond_json(400, {"ok": False, "error": "invalid_date_of_birth"})
+            return
+
         with CREATORS_LOCK:
             creators = load_creators()
             creator = find_creator(creators, creator_id)
@@ -2468,6 +2544,9 @@ class Handler(BaseHTTPRequestHandler):
             os.chmod(new_path, 0o600)
 
             creator["id_document_filename"] = new_filename
+            creator["id_document_type"] = document_type
+            # 生年月日は承認後も保持し続ける個人情報のため、平文では保存せず暗号化して保持する
+            creator["id_date_of_birth_encrypted"] = encrypt_pii(date_of_birth)
             creator["id_verification_status"] = "pending"
             creator["id_submitted_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             creator["id_reviewed_at"] = None
@@ -2783,6 +2862,10 @@ class Handler(BaseHTTPRequestHandler):
                 "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
                 "idVerificationStatus": c.get("id_verification_status", "not_submitted"),
                 "hasIdDocument": bool(c.get("id_document_filename")),
+                "idDocumentType": c.get("id_document_type"),
+                "idDocumentTypeLabel": ID_DOCUMENT_TYPES.get(c.get("id_document_type")),
+                "idDateOfBirth": decrypt_pii(c.get("id_date_of_birth_encrypted")),
+                "idAge": calculate_age(decrypt_pii(c.get("id_date_of_birth_encrypted"))),
                 "idSubmittedAt": c.get("id_submitted_at"),
                 "idReviewedAt": c.get("id_reviewed_at"),
                 "idRejectionReason": c.get("id_rejection_reason"),
@@ -2830,6 +2913,8 @@ class Handler(BaseHTTPRequestHandler):
                 "contact_url": contact_url,
                 "id_verification_status": "not_submitted",
                 "id_document_filename": None,
+                "id_document_type": None,
+                "id_date_of_birth_encrypted": None,
                 "id_submitted_at": None,
                 "id_reviewed_at": None,
                 "id_rejection_reason": None,

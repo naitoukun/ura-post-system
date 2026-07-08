@@ -1059,6 +1059,18 @@
     }
     idWrap.appendChild(idStatusRow);
 
+    if (creator.idDocumentTypeLabel || creator.idDateOfBirth) {
+      const idDetailText = document.createElement('p');
+      idDetailText.className = 'text-[11px] text-slate-500';
+      const parts = [];
+      if (creator.idDocumentTypeLabel) parts.push('種類: ' + creator.idDocumentTypeLabel);
+      if (creator.idDateOfBirth) {
+        parts.push('生年月日: ' + creator.idDateOfBirth + (creator.idAge != null ? '（' + creator.idAge + '歳）' : ''));
+      }
+      idDetailText.textContent = parts.join(' / ') + '　※提出書類の画像と一致するか確認してください';
+      idWrap.appendChild(idDetailText);
+    }
+
     if (creator.idRejectionReason) {
       const reasonText = document.createElement('p');
       reasonText.className = 'text-[11px] text-rose-500';

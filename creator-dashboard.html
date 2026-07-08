@@ -66,6 +66,20 @@
       <p class="text-xs text-slate-400">
         運転免許証・パスポート等、生年月日と顔写真が確認できる身分証の画像（またはPDF）をアップロードしてください。承認されるまでコンテンツのアップロードはできません。
       </p>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-slate-500">身分証の種類</span>
+        <select id="idDocumentTypeSelect" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+          <option value="drivers_license">運転免許証</option>
+          <option value="passport">パスポート</option>
+          <option value="mynumber_card">マイナンバーカード</option>
+          <option value="residence_card">在留カード</option>
+          <option value="other">その他の公的書類</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-slate-500">生年月日（身分証記載のとおりに入力してください）</span>
+        <input id="dateOfBirthInput" type="date" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      </label>
       <input id="idDocumentInput" type="file" accept="image/*,.pdf" class="text-sm" />
       <button id="idDocumentSubmitBtn" type="button" class="btn-primary rounded-lg py-2 text-sm font-bold">
         提出する
@@ -175,6 +189,8 @@
   const idVerificationStatusText = document.getElementById('idVerificationStatusText');
   const idVerificationSubmitWrap = document.getElementById('idVerificationSubmitWrap');
   const idDocumentInput = document.getElementById('idDocumentInput');
+  const idDocumentTypeSelect = document.getElementById('idDocumentTypeSelect');
+  const dateOfBirthInput = document.getElementById('dateOfBirthInput');
   const idDocumentSubmitBtn = document.getElementById('idDocumentSubmitBtn');
   const idDocumentResultMsg = document.getElementById('idDocumentResultMsg');
 
@@ -338,6 +354,11 @@
       idDocumentResultMsg.className = 'text-xs text-rose-500';
       return;
     }
+    if (!dateOfBirthInput.value) {
+      idDocumentResultMsg.textContent = '生年月日を入力してください。';
+      idDocumentResultMsg.className = 'text-xs text-rose-500';
+      return;
+    }
 
     idDocumentSubmitBtn.disabled = true;
     idDocumentResultMsg.textContent = '';
@@ -345,6 +366,8 @@
 
     const formData = new FormData();
     formData.append('idDocument', file);
+    formData.append('documentType', idDocumentTypeSelect.value);
+    formData.append('dateOfBirth', dateOfBirthInput.value);
 
     fetch('/api/creator/submit-id', { method: 'POST', body: formData })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
@@ -353,6 +376,7 @@
         if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
           idDocumentInput.value = '';
+          dateOfBirthInput.value = '';
           idDocumentResultMsg.textContent = '提出しました。運営の審査をお待ちください。';
           idDocumentResultMsg.className = 'text-xs text-teal-600';
           updateIdVerificationUI(data.idVerificationStatus, null);
@@ -361,6 +385,12 @@
           idDocumentResultMsg.className = 'text-xs text-rose-500';
         } else if (data.error === 'file_too_large') {
           idDocumentResultMsg.textContent = 'ファイルサイズが大きすぎます。';
+          idDocumentResultMsg.className = 'text-xs text-rose-500';
+        } else if (data.error === 'invalid_document_type') {
+          idDocumentResultMsg.textContent = '身分証の種類を選択してください。';
+          idDocumentResultMsg.className = 'text-xs text-rose-500';
+        } else if (data.error === 'invalid_date_of_birth') {
+          idDocumentResultMsg.textContent = '生年月日が正しくありません（18歳未満は登録できません）。';
           idDocumentResultMsg.className = 'text-xs text-rose-500';
         } else {
           idDocumentResultMsg.textContent = '提出に失敗しました（' + (data.error || status) + '）';

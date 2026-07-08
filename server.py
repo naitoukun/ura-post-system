@@ -11,6 +11,7 @@
 - GET  /disclaimer      免責事項
 - GET  /copyright-policy 著作権ポリシー・2257条コンプライアンス表明（ExoClick審査要件）
 - GET  /creator-terms    クリエイター向け利用規約（登録時に同意が必須）
+- GET  /recruit          クリエイター募集用のPRページ（ログイン不要、サイト内の他ページへのリンク無し）
 - GET  /og-image        SNSシェア時のOGP/Twitterカード用サイト共通画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
 - GET  /thumb/<id>      動画ごとに設定した個別サムネイル（未設定ならそもそも参照されない）
 - GET  /stats/<token>   クリエイター向けの視聴データページ（ログイン不要。共有リンクとは別トークン）
@@ -1159,6 +1160,10 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "copyright-policy.html"), "text/html; charset=utf-8")
         elif path == "/creator-terms":
             self.serve_file(os.path.join(BASE_DIR, "creator-terms.html"), "text/html; charset=utf-8")
+        elif path == "/recruit":
+            # クリエイター募集用のPRページ。X等から誰でも見れるよう、ログイン不要・サイト内の
+            # 他ページへのリンクも一切含まない単独ページにしてある。
+            self.serve_file(os.path.join(BASE_DIR, "recruit.html"), "text/html; charset=utf-8")
         elif path == "/og-image":
             self.handle_serve_og_image()
         elif path.startswith("/thumb/"):

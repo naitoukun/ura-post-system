@@ -299,6 +299,11 @@
   // （実際の広告は尺が広告ごとに異なり、終了タイミングはSDK側のコールバックで通知されるため、
   // 通常はここに来ない。あくまで広告が出せない時に視聴者を待たせすぎないための保険）。
   const NO_AD_FALLBACK_WAIT_MS = 3000;
+  // ADS_MANAGER_LOADED/AD_ERROR のどちらも発火しないまま広告ネットワークからの応答が
+  // 無くなる(ハング)ケースの保険。requestAds()を呼んだ時点からの絶対的な上限であり、
+  // 通常の広告読み込み+再生時間よりは十分長く、かつ視聴者を無限に待たせないための値。
+  // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
+  const MAX_AD_WAIT_MS = 25000;
   // 画像ギャラリーは動画のような「視聴完了」イベントが無い広告(ExoClick AdProvider)を使うため、
   // 表示してから固定秒数後に自動でアンロックする。
   const IMAGE_AD_DISPLAY_MS = 3000;
@@ -468,6 +473,9 @@
     adsRequest.nonLinearAdSlotHeight = Math.round(adPlayerWrap.clientHeight / 3);
 
     adsLoader.requestAds(adsRequest);
+    // 広告ネットワークからの応答自体が来ずADS_MANAGER_LOADED/AD_ERRORのどちらも
+    // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限。
+    setTimeout(onAdFinished, MAX_AD_WAIT_MS);
   }
 
   // 画像ギャラリーのアンロック広告(ExoClick AdProvider)。

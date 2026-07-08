@@ -617,18 +617,14 @@
     const preview = document.createElement('img');
     preview.className = 'w-full max-w-[200px] rounded-lg border border-slate-100 object-cover';
     preview.alt = '現在のサムネイル';
-    if (item.hasThumbnail) {
-      preview.src = item.thumbnailUrl + '?t=' + Date.now();
-    } else {
-      preview.style.display = 'none';
-    }
+    preview.src = (item.hasThumbnail ? item.thumbnailUrl : '/og-image') + '?t=' + Date.now();
     body.appendChild(preview);
 
     const currentLabel = document.createElement('p');
     currentLabel.className = 'text-[11px] text-slate-400';
     currentLabel.textContent = item.hasThumbnail
-      ? '現在のサムネイルです。未設定の場合は動画のプレビュー画像等が使われます。'
-      : '未設定です。設定しない場合は動画のプレビュー画像等が使われます。';
+      ? '現在このサムネイルが使われています。'
+      : '未設定のため、サイト共通の既定画像（上記）が使われています。';
     body.appendChild(currentLabel);
 
     const fileInput = document.createElement('input');

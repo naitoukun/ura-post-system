@@ -111,9 +111,17 @@
     <p class="text-xs text-slate-400 mt-1">動画ごとのシェア用リンクです。</p>
   </div>
 
+  <input id="videoSearchInput" type="search" placeholder="ファイル名・投稿者名・IDで絞り込み"
+    class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
+
   <div id="videoListBox" class="flex flex-col gap-3">
     <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
   </div>
+
+  <button id="videoListMoreBtn" type="button"
+    class="hidden border border-slate-200 rounded-lg py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+    もっと見る
+  </button>
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">ポイント設定</h2>
@@ -181,9 +189,17 @@
   </form>
   <div id="inviteResultBox" class="hidden flex flex-col gap-2 border border-teal-100 rounded-xl p-3 bg-teal-50/40"></div>
 
+  <input id="creatorSearchInput" type="search" placeholder="表示名・ログインコードで絞り込み"
+    class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
+
   <div id="creatorListBox" class="flex flex-col gap-3">
     <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
   </div>
+
+  <button id="creatorListMoreBtn" type="button"
+    class="hidden border border-slate-200 rounded-lg py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+    もっと見る
+  </button>
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">プレミアムリンク設定</h2>
@@ -331,6 +347,8 @@
   const progressText= document.getElementById('progressText');
   const resultMsg   = document.getElementById('resultMsg');
   const videoListBox= document.getElementById('videoListBox');
+  const videoSearchInput = document.getElementById('videoSearchInput');
+  const videoListMoreBtn = document.getElementById('videoListMoreBtn');
 
   const linkStatusBox = document.getElementById('linkStatusBox');
   const linkForm      = document.getElementById('linkForm');
@@ -358,6 +376,8 @@
   const inviteSubmitBtn = document.getElementById('inviteSubmitBtn');
   const inviteResultBox = document.getElementById('inviteResultBox');
   const creatorListBox  = document.getElementById('creatorListBox');
+  const creatorSearchInput = document.getElementById('creatorSearchInput');
+  const creatorListMoreBtn = document.getElementById('creatorListMoreBtn');
   const pendingRedemptionsBox = document.getElementById('pendingRedemptionsBox');
 
   const ogImagePreview  = document.getElementById('ogImagePreview');
@@ -640,32 +660,78 @@
       });
   });
 
+  const CREATOR_PAGE_SIZE = 20;
+  let allCreators = [];
+  let creatorVisibleCount = CREATOR_PAGE_SIZE;
+
   function refreshCreatorList() {
     fetch('/api/creators', { cache: 'no-store' })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
       .then(({ status, data }) => {
         if (redirectIfUnauthenticated(status)) return;
-        const creators = Array.isArray(data) ? data : [];
+        allCreators = Array.isArray(data) ? data : [];
+        creatorVisibleCount = CREATOR_PAGE_SIZE;
 
-        renderPendingRedemptions(creators);
-
-        if (!creators.length) {
-          creatorListBox.innerHTML =
-            '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ招待していません。</div>';
-          return;
-        }
-        creatorListBox.innerHTML = '';
-        creators.forEach((creator) => {
-          creatorListBox.appendChild(buildCreatorCard(creator));
-        });
+        renderPendingRedemptions(allCreators);
+        renderCreatorList();
       })
       .catch(() => {
         creatorListBox.innerHTML =
           '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
         pendingRedemptionsBox.innerHTML =
           '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+        creatorListMoreBtn.classList.add('hidden');
       });
   }
+
+  function filterCreators(creators) {
+    const q = creatorSearchInput.value.trim().toLowerCase();
+    if (!q) return creators;
+    return creators.filter((c) => (
+      (c.displayName || '').toLowerCase().includes(q) ||
+      (c.loginCode || '').toLowerCase().includes(q)
+    ));
+  }
+
+  function renderCreatorList() {
+    if (!allCreators.length) {
+      creatorListBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ招待していません。</div>';
+      creatorListMoreBtn.classList.add('hidden');
+      return;
+    }
+
+    const filtered = filterCreators(allCreators);
+    if (!filtered.length) {
+      creatorListBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">該当するアカウントが見つかりません。</div>';
+      creatorListMoreBtn.classList.add('hidden');
+      return;
+    }
+
+    const visible = filtered.slice(0, creatorVisibleCount);
+    creatorListBox.innerHTML = '';
+    visible.forEach((creator) => {
+      creatorListBox.appendChild(buildCreatorCard(creator));
+    });
+
+    if (filtered.length > visible.length) {
+      creatorListMoreBtn.classList.remove('hidden');
+      creatorListMoreBtn.textContent = 'もっと見る（残り' + (filtered.length - visible.length) + '件）';
+    } else {
+      creatorListMoreBtn.classList.add('hidden');
+    }
+  }
+
+  creatorSearchInput.addEventListener('input', () => {
+    creatorVisibleCount = CREATOR_PAGE_SIZE;
+    renderCreatorList();
+  });
+
+  creatorListMoreBtn.addEventListener('click', () => {
+    creatorVisibleCount += CREATOR_PAGE_SIZE;
+    renderCreatorList();
+  });
 
   function renderPendingRedemptions(creators) {
     const rows = [];
@@ -1302,25 +1368,74 @@
       });
   });
 
+  const VIDEO_PAGE_SIZE = 20;
+  let allVideos = [];
+  let videoVisibleCount = VIDEO_PAGE_SIZE;
+
   function refreshVideoList() {
     fetch('/api/videos', { cache: 'no-store' })
       .then((res) => res.json())
       .then((videos) => {
-        if (!videos.length) {
-          videoListBox.innerHTML =
-            '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ動画がアップロードされていません。</div>';
-          return;
-        }
-        videoListBox.innerHTML = '';
-        videos.forEach((video) => {
-          videoListBox.appendChild(buildVideoCard(video));
-        });
+        allVideos = videos;
+        videoVisibleCount = VIDEO_PAGE_SIZE;
+        renderVideoList();
       })
       .catch(() => {
         videoListBox.innerHTML =
           '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+        videoListMoreBtn.classList.add('hidden');
       });
   }
+
+  function filterVideos(videos) {
+    const q = videoSearchInput.value.trim().toLowerCase();
+    if (!q) return videos;
+    return videos.filter((v) => (
+      (v.originalFilename || '').toLowerCase().includes(q) ||
+      (v.ownerDisplayName || '').toLowerCase().includes(q) ||
+      (v.id || '').toLowerCase().includes(q)
+    ));
+  }
+
+  function renderVideoList() {
+    if (!allVideos.length) {
+      videoListBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ動画がアップロードされていません。</div>';
+      videoListMoreBtn.classList.add('hidden');
+      return;
+    }
+
+    const filtered = filterVideos(allVideos);
+    if (!filtered.length) {
+      videoListBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">該当する動画が見つかりません。</div>';
+      videoListMoreBtn.classList.add('hidden');
+      return;
+    }
+
+    const visible = filtered.slice(0, videoVisibleCount);
+    videoListBox.innerHTML = '';
+    visible.forEach((video) => {
+      videoListBox.appendChild(buildVideoCard(video));
+    });
+
+    if (filtered.length > visible.length) {
+      videoListMoreBtn.classList.remove('hidden');
+      videoListMoreBtn.textContent = 'もっと見る（残り' + (filtered.length - visible.length) + '件）';
+    } else {
+      videoListMoreBtn.classList.add('hidden');
+    }
+  }
+
+  videoSearchInput.addEventListener('input', () => {
+    videoVisibleCount = VIDEO_PAGE_SIZE;
+    renderVideoList();
+  });
+
+  videoListMoreBtn.addEventListener('click', () => {
+    videoVisibleCount += VIDEO_PAGE_SIZE;
+    renderVideoList();
+  });
 
   function buildVideoCard(video) {
     const shareUrl = location.origin + '/?v=' + encodeURIComponent(video.id);

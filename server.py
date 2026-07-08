@@ -1306,6 +1306,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_id_document(parse_qs(split.query))
+        elif path == "/api/creator/content/video-source":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_video_source(parse_qs(split.query))
         else:
             self.send_error(404, "Not Found")
 
@@ -2568,6 +2572,77 @@ class Handler(BaseHTTPRequestHandler):
             save_videos(videos)
 
         self.respond_json(200, {"ok": True})
+
+    def handle_creator_video_source(self, query):
+        """サムネイル自動生成(動画の1フレームをキャプチャ)用に、本人の動画本体を返す。
+
+        公開共有リンク(/video/<id>)と違い、初回アクセス記録(24時間限定の起算)や
+        期限切れチェックは行わない。自分の投稿を見るだけなので、それらを
+        トリガーしてしまうのは意図しない副作用になるため。
+        """
+        creator_id = self.get_creator_id()
+        video_id = (query.get("id") or [None])[0]
+        video = find_video(video_id)
+        if not video or video.get("owner_creator_id") != creator_id or video.get("content_type") == "image":
+            self.send_error(404, "Not Found")
+            return
+
+        path = video_file_path(video)
+        if not path:
+            self.send_error(404, "Not Found")
+            return
+
+        file_size = os.path.getsize(path)
+        content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        range_header = self.headers.get("Range")
+
+        if range_header:
+            match = re.match(r"bytes=(\d*)-(\d*)", range_header)
+            if not match:
+                self.send_error(416, "Invalid Range")
+                return
+            start_str, end_str = match.groups()
+            start = int(start_str) if start_str else 0
+            end = int(end_str) if end_str else file_size - 1
+            end = min(end, file_size - 1)
+
+            if start > end or start >= file_size:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{file_size}")
+                self.end_headers()
+                return
+
+            chunk_size = end - start + 1
+            self.send_response(206)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+            self.send_header("Content-Length", str(chunk_size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = chunk_size
+                while remaining > 0:
+                    chunk = f.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        else:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(file_size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
 
     def handle_creator_submit_id(self):
         """クリエイター自身による年齢確認用の身分証提出(multipart/form-data)。

@@ -215,6 +215,14 @@
       ♥ 【ファン限定】Fantia特設ページへ ♥
     </a>
 
+    <button
+      id="shareBtn"
+      type="button"
+      class="w-full border border-gray-200 text-gray-500 rounded-xl py-3 text-sm font-medium hover:bg-gray-50"
+    >
+      このページをシェアする
+    </button>
+
     <!-- 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンIDが異なるため、
          判定した方の<ins>だけをJS側で動的に生成する(両方を置いて片方をCSSで隠すと、
          隠した方にも広告リクエストが飛んでしまうため)。 -->
@@ -267,6 +275,7 @@
   const mainVideo   = document.getElementById('mainVideo');
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
+  const shareBtn = document.getElementById('shareBtn');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
   // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
@@ -293,6 +302,28 @@
   });
   ageGateNo.addEventListener('click', () => {
     location.href = 'https://www.google.com/';
+  });
+
+  shareBtn.addEventListener('click', () => {
+    const shareUrl = location.href;
+    const shareData = { title: 'うらぽす', text: 'うらぽすでこんな投稿を見つけました', url: shareUrl };
+
+    if (navigator.share) {
+      navigator.share(shareData).catch(() => {});
+      return;
+    }
+
+    const originalText = shareBtn.textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        shareBtn.textContent = 'リンクをコピーしました';
+        setTimeout(() => { shareBtn.textContent = originalText; }, 1800);
+      }).catch(() => {
+        window.prompt('このURLをコピーしてシェアしてください', shareUrl);
+      });
+    } else {
+      window.prompt('このURLをコピーしてシェアしてください', shareUrl);
+    }
   });
 
   // 広告コードが未設定、またはVASTタグがエラー/フィル無しだった場合のフォールバック待機時間

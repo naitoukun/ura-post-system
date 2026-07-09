@@ -53,7 +53,7 @@
     </button>
   </div>
 
-  <div class="card rounded-2xl p-4 flex flex-col gap-1">
+  <div id="pointsBalanceCard" class="card rounded-2xl p-4 flex flex-col gap-1">
     <span class="text-xs text-slate-400">現在のポイント残高</span>
     <span id="pointsBalanceText" class="points-count text-4xl font-extrabold text-teal-600">-</span>
     <span id="pointsYenText" class="text-sm font-medium text-slate-500">-</span>
@@ -181,6 +181,7 @@
   const resultMsg   = document.getElementById('resultMsg');
   const contentListBox = document.getElementById('contentListBox');
   const logoutBtn   = document.getElementById('logoutBtn');
+  const pointsBalanceCard = document.getElementById('pointsBalanceCard');
   const pointsBalanceText = document.getElementById('pointsBalanceText');
   const pointsYenText = document.getElementById('pointsYenText');
   const dailyUploadStatusText = document.getElementById('dailyUploadStatusText');
@@ -914,10 +915,16 @@
       .then(({ status, data }) => {
         if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
-          currentBalance = data.pointsBalance || 0;
-          currentBalanceYen = data.pointsBalanceYen || 0;
-          currentRedemptions = data.redemptionRequests || [];
-          refreshPointsBox();
+          if (data.authMode === 'magic_link') {
+            // ライト版はポイント制度を使わず、報酬は運営が個別に対応するため非表示にする
+            pointsBalanceCard.classList.add('hidden');
+            redemptionForm.classList.add('hidden');
+          } else {
+            currentBalance = data.pointsBalance || 0;
+            currentBalanceYen = data.pointsBalanceYen || 0;
+            currentRedemptions = data.redemptionRequests || [];
+            refreshPointsBox();
+          }
           updateIdVerificationUI(data.idVerificationStatus, data.idRejectionReason);
 
           if (typeof data.maxUploadsPerDay === 'number') {

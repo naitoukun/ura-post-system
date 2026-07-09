@@ -88,6 +88,35 @@
     </a>
   </div>
 
+  <div id="magicLinkFormBox" class="hidden flex flex-col gap-5">
+    <div>
+      <h1 class="text-xl font-bold text-slate-800">ようこそ</h1>
+      <p class="text-xs text-slate-400 mt-1">パスワードの設定は不要です。このリンクがそのままログインの代わりになります。</p>
+    </div>
+
+    <div class="card rounded-2xl p-4 flex flex-col gap-4">
+      <label class="flex items-start gap-2">
+        <input type="checkbox" id="magicLinkAgree" class="w-4 h-4 mt-0.5" />
+        <span class="text-xs text-slate-600">
+          <a href="/creator-terms" target="_blank" rel="noopener noreferrer" class="text-teal-600 underline">クリエイター利用規約</a>
+          に同意します
+        </span>
+      </label>
+
+      <button type="button" id="magicLinkSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+        はじめる
+      </button>
+
+      <p id="magicLinkResultMsg" class="text-sm text-rose-500"></p>
+    </div>
+
+    <p class="text-[11px] text-slate-400">このリンクは今後も使えます。ブックマークしておくと次回から入力なしですぐ入れます。</p>
+  </div>
+
+  <div id="magicLinkLoadingBox" class="hidden">
+    <p class="text-sm text-slate-400">アクセス中…</p>
+  </div>
+
 </div>
 
 <script>
@@ -97,11 +126,73 @@
   const invalidBox = document.getElementById('invalidBox');
   const formBox = document.getElementById('formBox');
   const successBox = document.getElementById('successBox');
+  const magicLinkFormBox = document.getElementById('magicLinkFormBox');
+  const magicLinkLoadingBox = document.getElementById('magicLinkLoadingBox');
 
   if (!state.valid) {
     invalidBox.classList.remove('hidden');
     return;
   }
+
+  if (state.mode === 'magic_link') {
+    if (state.alreadyAgreed) {
+      magicLinkLoadingBox.classList.remove('hidden');
+      fetch('/api/creator/magic-link-enter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteToken: state.token }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (status === 200 && data.ok) {
+            window.location.href = '/creator';
+          } else {
+            magicLinkLoadingBox.classList.add('hidden');
+            invalidBox.classList.remove('hidden');
+          }
+        })
+        .catch(() => {
+          magicLinkLoadingBox.classList.add('hidden');
+          invalidBox.classList.remove('hidden');
+        });
+      return;
+    }
+
+    magicLinkFormBox.classList.remove('hidden');
+    const agreeCheckbox = document.getElementById('magicLinkAgree');
+    const magicLinkSubmitBtn = document.getElementById('magicLinkSubmitBtn');
+    const magicLinkResultMsg = document.getElementById('magicLinkResultMsg');
+
+    magicLinkSubmitBtn.addEventListener('click', function () {
+      magicLinkResultMsg.textContent = '';
+      if (!agreeCheckbox.checked) {
+        magicLinkResultMsg.textContent = 'クリエイター利用規約への同意が必要です。';
+        return;
+      }
+
+      magicLinkSubmitBtn.disabled = true;
+      fetch('/api/creator/magic-link-enter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteToken: state.token, agreedToTerms: true }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (status === 200 && data.ok) {
+            window.location.href = '/creator';
+          } else {
+            magicLinkSubmitBtn.disabled = false;
+            magicLinkResultMsg.textContent = '登録に失敗しました（' + (data.error || status) + '）';
+          }
+        })
+        .catch(() => {
+          magicLinkSubmitBtn.disabled = false;
+          magicLinkResultMsg.textContent = '通信エラーが発生しました。';
+        });
+    });
+    return;
+  }
+
   formBox.classList.remove('hidden');
 
   const registerForm = document.getElementById('registerForm');

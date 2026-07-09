@@ -1431,6 +1431,28 @@ class Handler(BaseHTTPRequestHandler):
         owner_creator = find_creator(load_creators(), video.get("owner_creator_id")) if video.get("owner_creator_id") else None
         cta = get_effective_cta(video, config, owner_creator)
 
+        # 同じクリエイターの他の投稿だけを案内する(他のクリエイターへの回遊は意図的に含めない。
+        # 投稿者から見て、自分の視聴者が別の投稿者に流れてしまう導線は避けたいため)。
+        other_content = []
+        owner_creator_id = video.get("owner_creator_id")
+        if owner_creator_id:
+            others = [
+                v for v in videos_list
+                if v.get("owner_creator_id") == owner_creator_id
+                and v["id"] != video["id"]
+                and video_file_path(v)
+                and not get_time_limit_status(v)["expired"]
+            ]
+            others.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
+            other_content = [
+                {
+                    "id": v["id"],
+                    "contentType": v.get("content_type", "video"),
+                    "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
+                }
+                for v in others[:6]
+            ]
+
         content_type = video.get("content_type", "video")
         self.respond_json(200, {
             "expired": False,
@@ -1445,6 +1467,7 @@ class Handler(BaseHTTPRequestHandler):
             "premiumButtonText": cta["premiumButtonText"],
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
+            "otherContentByCreator": other_content,
         })
 
     def handle_serve_video(self, video_id):

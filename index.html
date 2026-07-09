@@ -223,6 +223,12 @@
       このページをシェアする
     </button>
 
+    <!-- 同じ投稿者の他の投稿だけを案内する(他の投稿者への回遊は含めない) -->
+    <div id="otherContentBox" class="hidden-el w-full flex flex-col gap-2">
+      <p class="text-xs text-gray-400 w-full">この投稿者の他のコンテンツ</p>
+      <div id="otherContentGrid" class="w-full grid grid-cols-3 gap-2"></div>
+    </div>
+
     <!-- 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンIDが異なるため、
          判定した方の<ins>だけをJS側で動的に生成する(両方を置いて片方をCSSで隠すと、
          隠した方にも広告リクエストが飛んでしまうため)。 -->
@@ -276,6 +282,8 @@
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
   const shareBtn = document.getElementById('shareBtn');
+  const otherContentBox = document.getElementById('otherContentBox');
+  const otherContentGrid = document.getElementById('otherContentGrid');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
   // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
@@ -383,7 +391,36 @@
     if (info.timeLimit && info.timeLimit.enabled && info.timeLimit.expiresAtEpoch) {
       startCountdown(info.timeLimit.expiresAtEpoch);
     }
+
+    renderOtherContent(info.otherContentByCreator || []);
   });
+
+  // 同じ投稿者の他の投稿へのサムネイル付きリンクを並べる(他の投稿者への導線は含めない)
+  function renderOtherContent(items) {
+    if (!items.length) return;
+    otherContentGrid.innerHTML = '';
+    items.forEach((item) => {
+      const link = document.createElement('a');
+      link.href = '/?v=' + encodeURIComponent(item.id);
+      link.className = 'block aspect-square rounded-lg overflow-hidden bg-gray-100 relative';
+
+      const img = document.createElement('img');
+      img.src = item.thumbnailUrl || '/og-image';
+      img.className = 'w-full h-full object-cover';
+      img.alt = '';
+      link.appendChild(img);
+
+      if (item.contentType === 'image') {
+        const badge = document.createElement('span');
+        badge.className = 'absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
+        badge.textContent = '画像';
+        link.appendChild(badge);
+      }
+
+      otherContentGrid.appendChild(link);
+    });
+    otherContentBox.classList.remove('hidden-el');
+  }
 
   // 24時間限定の残り時間を1秒ごとに更新表示する。0になったら「期限切れ」画面に切り替える。
   function startCountdown(expiresAtEpoch) {
@@ -625,6 +662,7 @@
           premiumButtonText: status.premiumButtonText,
           contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
           contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
+          otherContentByCreator: status.otherContentByCreator,
         };
       })
       .catch(() => ({ linkRequired: true }));

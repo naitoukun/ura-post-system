@@ -1293,6 +1293,10 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_serve_thumbnail(path[len("/thumb/"):])
         elif path.startswith("/stats/"):
             self.handle_serve_creator_stats(path[len("/stats/"):])
+        elif path.startswith("/creator-posts/"):
+            self.handle_serve_creator_posts_page(path[len("/creator-posts/"):])
+        elif path == "/api/creator-posts":
+            self.handle_api_creator_posts(parse_qs(split.query))
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -1468,6 +1472,7 @@ class Handler(BaseHTTPRequestHandler):
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
             "otherContentByCreator": other_content,
+            "ownerCreatorId": owner_creator_id,
         })
 
     def handle_serve_video(self, video_id):
@@ -1652,6 +1657,55 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def handle_serve_creator_posts_page(self, creator_id):
+        """あるクリエイターの投稿一覧ページ(creator-posts.html)を返す。
+
+        他のクリエイターへは遷移できないよう、常にこの1人分のcreator_idに
+        スコープしたままにする(一覧データ自体は/api/creator-postsで別途取得)。
+        """
+        with open(os.path.join(BASE_DIR, "creator-posts.html"), "r", encoding="utf-8") as f:
+            page_html = f.read()
+        page_html = page_html.replace("{{CREATOR_ID_JSON}}", json.dumps(creator_id))
+
+        body = page_html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_api_creator_posts(self, query):
+        """あるクリエイターの投稿を全件返す(公開・認証不要)。
+
+        /resolve-videoのotherContentByCreatorと同じ絞り込み条件(所有者一致・
+        実体ファイルが存在・期限切れでない)だが、件数上限を設けず全件返す。
+        """
+        creator_id = (query.get("creatorId") or [None])[0]
+        if not creator_id:
+            self.respond_json(200, {"items": []})
+            return
+
+        videos_list = load_videos()
+        items = [
+            v for v in videos_list
+            if v.get("owner_creator_id") == creator_id
+            and video_file_path(v)
+            and not get_time_limit_status(v)["expired"]
+        ]
+        items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
+
+        self.respond_json(200, {
+            "items": [
+                {
+                    "id": v["id"],
+                    "contentType": v.get("content_type", "video"),
+                    "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
+                }
+                for v in items[:60]
+            ]
+        })
 
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。

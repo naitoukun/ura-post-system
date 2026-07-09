@@ -225,7 +225,10 @@
 
     <!-- 同じ投稿者の他の投稿だけを案内する(他の投稿者への回遊は含めない) -->
     <div id="otherContentBox" class="hidden-el w-full flex flex-col gap-2">
-      <p class="text-xs text-gray-400 w-full">この投稿者の他のコンテンツ</p>
+      <div class="w-full flex items-center justify-between">
+        <p class="text-xs text-gray-400">この投稿者の他のコンテンツ</p>
+        <a id="seeAllLink" href="#" class="text-xs text-gray-400 underline">投稿一覧をすべて見る</a>
+      </div>
       <div id="otherContentGrid" class="w-full grid grid-cols-3 gap-2"></div>
     </div>
 
@@ -284,6 +287,7 @@
   const shareBtn = document.getElementById('shareBtn');
   const otherContentBox = document.getElementById('otherContentBox');
   const otherContentGrid = document.getElementById('otherContentGrid');
+  const seeAllLink = document.getElementById('seeAllLink');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
   // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
@@ -392,12 +396,15 @@
       startCountdown(info.timeLimit.expiresAtEpoch);
     }
 
-    renderOtherContent(info.otherContentByCreator || []);
+    renderOtherContent(info.otherContentByCreator || [], info.ownerCreatorId);
   });
 
   // 同じ投稿者の他の投稿へのサムネイル付きリンクを並べる(他の投稿者への導線は含めない)
-  function renderOtherContent(items) {
+  function renderOtherContent(items, ownerCreatorId) {
     if (!items.length) return;
+    if (ownerCreatorId) {
+      seeAllLink.href = '/creator-posts/' + encodeURIComponent(ownerCreatorId);
+    }
     otherContentGrid.innerHTML = '';
     items.forEach((item) => {
       const link = document.createElement('a');
@@ -663,6 +670,7 @@
           contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
           contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
           otherContentByCreator: status.otherContentByCreator,
+          ownerCreatorId: status.ownerCreatorId,
         };
       })
       .catch(() => ({ linkRequired: true }));

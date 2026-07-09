@@ -929,6 +929,34 @@
     resetPasswordBtn.textContent = 'パスワードをリセット';
     resetPasswordBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
     codeRow.appendChild(resetPasswordBtn);
+
+    const impersonateBtn = document.createElement('button');
+    impersonateBtn.type = 'button';
+    impersonateBtn.textContent = 'サイトを見る';
+    impersonateBtn.className = 'shrink-0 border border-teal-500 text-teal-600 rounded-lg px-2 py-1 text-xs font-medium hover:bg-teal-50';
+    impersonateBtn.addEventListener('click', () => {
+      impersonateBtn.disabled = true;
+      fetch('/api/creators/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          impersonateBtn.disabled = false;
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            window.open('/creator', '_blank');
+          } else {
+            alert('アクセスに失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          impersonateBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    codeRow.appendChild(impersonateBtn);
     body.appendChild(codeRow);
 
     const resetPasswordResultBox = document.createElement('div');

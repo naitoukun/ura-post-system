@@ -61,6 +61,7 @@
 - POST /api/creators/set-points-override  クリエイターごとの動画/画像付与ポイントの個別上書き（null=サイト既定値を使用）（JSON）※要ログイン(管理者)
 - POST /api/creators/set-contact  クリエイターの連絡先リンク(SNS等)の設定・更新・解除（JSON）※要ログイン(管理者)
 - POST /api/creators/reset-password  クリエイターのパスワードを強制再発行(新パスワードを一度だけ返す)（JSON）※要ログイン(管理者)
+- POST /api/creators/impersonate  管理者がパスワードを知らずにそのクリエイターとしてログインする(なりすまし。監査ログに記録)（JSON）※要ログイン(管理者)
 - GET  /api/creators/id-document  提出された身分証の画像/PDFの配信（機微情報のため管理者のみ）※要ログイン(管理者)
 - POST /api/creators/approve-id  提出された身分証を承認し、セルフアップロードを解禁する（JSON）※要ログイン(管理者)
 - POST /api/creators/reject-id  提出された身分証を却下する（理由は任意入力、JSON）※要ログイン(管理者)
@@ -1765,6 +1766,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_reset_password()
+        elif path == "/api/creators/impersonate":
+            if self.require_auth():
+                return
+            self.handle_creators_impersonate()
         elif path == "/api/creators/approve-id":
             if self.require_auth():
                 return
@@ -3350,6 +3355,53 @@ class Handler(BaseHTTPRequestHandler):
                 del CREATOR_SESSIONS[token]
 
         self.respond_json(200, {"ok": True, "newPassword": new_password})
+
+    def handle_creators_impersonate(self):
+        """管理者が、パスワードを知らなくても該当クリエイターとしてログインする(なりすまし)。
+
+        サポート対応等で本人視点の画面を確認したい場合用。誰が・いつ・誰に対して
+        行ったかを追跡できるよう、標準出力(journalctl)への記録と、クリエイター
+        レコード側にも最終実施日時を残す。管理者自身のセッション(sv_session)は
+        別Cookieのため、これによりログアウトされることはない。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["last_impersonated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_creators(creators)
+
+        print(
+            "[audit] admin impersonated creator", creator_id,
+            "(" + (creator.get("display_name") or "") + ")",
+            "from", get_client_ip(self),
+            "at", time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+        token = self.create_creator_session(creator_id)
+        self.send_response(200)
+        self.set_creator_session_cookie(token)
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def handle_creators_id_document(self, query):
         """管理者のみが閲覧できる、クリエイター提出の身分証の配信。

@@ -267,7 +267,6 @@
   <!-- 画像ギャラリーのアンロック時のみ表示(ExoClick AdProvider)。動画のadPlayerWrapとは排他的に切り替える -->
   <div id="imageAdWrap" class="hidden-el relative w-full max-w-md min-h-[250px] bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center gap-3 p-4">
     <ins id="imageAdIns" class="eas6a97888e33" data-zoneid="5968784"></ins>
-    <p id="imageAdCountdownText" class="text-xs text-white/80 text-center"></p>
   </div>
 
   <p id="selectedAdDebug" class="text-slate-300 text-[11px]"></p>
@@ -301,7 +300,6 @@
   const adLoadingState= document.getElementById('adLoadingState');
   const imageAdWrap   = document.getElementById('imageAdWrap');
   const imageAdIns    = document.getElementById('imageAdIns');
-  const imageAdCountdownText = document.getElementById('imageAdCountdownText');
   const ageGateOverlay= document.getElementById('ageGateOverlay');
   const ageGateYes    = document.getElementById('ageGateYes');
   const ageGateNo     = document.getElementById('ageGateNo');
@@ -538,19 +536,7 @@
 
     (window.AdProvider = window.AdProvider || []).push({ serve: {} });
 
-    let remainingSeconds = Math.ceil(IMAGE_AD_DISPLAY_MS / 1000);
-    imageAdCountdownText.textContent = remainingSeconds + '秒後にアンロックされます…';
-    const intervalId = setInterval(() => {
-      remainingSeconds -= 1;
-      if (remainingSeconds > 0) {
-        imageAdCountdownText.textContent = remainingSeconds + '秒後にアンロックされます…';
-      }
-    }, 1000);
-
-    setTimeout(() => {
-      clearInterval(intervalId);
-      onAdFinished();
-    }, IMAGE_AD_DISPLAY_MS);
+    setTimeout(onAdFinished, IMAGE_AD_DISPLAY_MS);
   }
 
   // 広告A(index 0)=動画側、広告B(index 1)=画像側に完全に振り分ける。

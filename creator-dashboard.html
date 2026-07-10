@@ -53,6 +53,19 @@
     </button>
   </div>
 
+  <div class="card rounded-2xl p-4 flex flex-col gap-2">
+    <span class="text-sm font-medium text-slate-700">表示名</span>
+    <p class="text-xs text-slate-400">応援ボタンの既定の文言（「（表示名）を応援する」）等に使われます。</p>
+    <div class="flex gap-2">
+      <input id="displayNameInput" type="text" maxlength="40" placeholder="表示名"
+        class="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      <button id="displayNameSaveBtn" type="button" class="shrink-0 border border-teal-500 text-teal-600 rounded-lg px-3 py-2 text-sm font-medium hover:bg-teal-50">
+        保存
+      </button>
+    </div>
+    <p id="displayNameResultMsg" class="text-xs min-h-[1em]"></p>
+  </div>
+
   <div id="pointsBalanceCard" class="card rounded-2xl p-4 flex flex-col gap-1">
     <span class="text-xs text-slate-400">現在のポイント残高</span>
     <span id="pointsBalanceText" class="points-count text-4xl font-extrabold text-teal-600">-</span>
@@ -179,6 +192,9 @@
   const resultMsg   = document.getElementById('resultMsg');
   const contentListBox = document.getElementById('contentListBox');
   const logoutBtn   = document.getElementById('logoutBtn');
+  const displayNameInput = document.getElementById('displayNameInput');
+  const displayNameSaveBtn = document.getElementById('displayNameSaveBtn');
+  const displayNameResultMsg = document.getElementById('displayNameResultMsg');
   const pointsBalanceCard = document.getElementById('pointsBalanceCard');
   const pointsBalanceText = document.getElementById('pointsBalanceText');
   const pointsYenText = document.getElementById('pointsYenText');
@@ -1022,6 +1038,7 @@
       .then(({ status, data }) => {
         if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
+          displayNameInput.value = data.displayName || '';
           if (data.authMode === 'magic_link') {
             // ライト版はポイント制度を使わず、報酬は運営が個別に対応するため非表示にする
             pointsBalanceCard.classList.add('hidden');
@@ -1037,6 +1054,35 @@
       })
       .catch(() => {});
   }
+
+  displayNameSaveBtn.addEventListener('click', () => {
+    displayNameResultMsg.textContent = '';
+    displayNameResultMsg.className = 'text-xs min-h-[1em]';
+    displayNameSaveBtn.disabled = true;
+    fetch('/api/creator/set-display-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: displayNameInput.value }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        displayNameSaveBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          displayNameInput.value = data.displayName || '';
+          displayNameResultMsg.textContent = '保存しました。';
+          displayNameResultMsg.className = 'text-xs text-teal-600';
+        } else {
+          displayNameResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          displayNameResultMsg.className = 'text-xs text-rose-500';
+        }
+      })
+      .catch(() => {
+        displayNameSaveBtn.disabled = false;
+        displayNameResultMsg.textContent = '通信エラーが発生しました。';
+        displayNameResultMsg.className = 'text-xs text-rose-500';
+      });
+  });
 
   refreshContentList();
 })();

@@ -1765,6 +1765,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_creator_set_cta_text()
+        elif path == "/api/creator/set-display-name":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_set_display_name()
         elif path == "/api/creator/content/set-thumbnail":
             if self.require_creator_auth():
                 return
@@ -1817,6 +1821,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_set_contact()
+        elif path == "/api/creators/set-display-name":
+            if self.require_auth():
+                return
+            self.handle_creators_set_display_name()
         elif path == "/api/creators/reset-password":
             if self.require_auth():
                 return
@@ -3084,6 +3092,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond_json(200, {
             "ok": True,
             "authMode": creator.get("auth_mode", "password"),
+            "displayName": creator.get("display_name"),
             "pointsBalance": creator.get("points_balance", 0),
             "pointsBalanceYen": points_to_yen(creator.get("points_balance", 0)),
             "redemptionRequests": [
@@ -3451,6 +3460,60 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
 
         self.respond_json(200, {"ok": True, "contactUrl": contact_url})
+
+    def handle_creators_set_display_name(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        creator_id = data.get("creatorId")
+        display_name = (data.get("displayName") or "").strip()[:40]
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["display_name"] = display_name or None
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "displayName": display_name or None})
+
+    def handle_creator_set_display_name(self):
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        display_name = (data.get("displayName") or "").strip()[:40]
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["display_name"] = display_name or None
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "displayName": display_name or None})
 
     def handle_creators_reset_password(self):
         """本人がパスワードを忘れた場合に、管理者側から強制的にパスワードを再発行する。

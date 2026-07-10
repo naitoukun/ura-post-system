@@ -1054,6 +1054,47 @@
       });
     }
 
+    // 表示名(管理用メモ・応援ボタンの既定文言にも使われる)
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'flex gap-2 items-center';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 40;
+    nameInput.placeholder = '表示名（メモ用）';
+    nameInput.value = creator.displayName || '';
+    nameInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs';
+    nameWrap.appendChild(nameInput);
+
+    const nameSaveBtn = document.createElement('button');
+    nameSaveBtn.type = 'button';
+    nameSaveBtn.textContent = '保存';
+    nameSaveBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    nameSaveBtn.addEventListener('click', () => {
+      nameSaveBtn.disabled = true;
+      fetch('/api/creators/set-display-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id, displayName: nameInput.value }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          nameSaveBtn.disabled = false;
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+          } else {
+            alert('更新に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          nameSaveBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    nameWrap.appendChild(nameSaveBtn);
+    body.appendChild(nameWrap);
+
     // 連絡先リンク(SNS等)。ポイント交換の連絡等をすぐ取れるように別タブで開く
     const contactWrap = document.createElement('div');
     contactWrap.className = 'flex gap-2 items-center';

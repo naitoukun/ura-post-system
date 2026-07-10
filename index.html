@@ -264,11 +264,6 @@
     </div>
   </div>
 
-  <!-- 画像ギャラリーのアンロック時のみ表示(ExoClick AdProvider)。動画のadPlayerWrapとは排他的に切り替える -->
-  <div id="imageAdWrap" class="hidden-el relative w-full max-w-md min-h-[250px] bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center gap-3 p-4">
-    <ins id="imageAdIns" class="eas6a97888e33" data-zoneid="5968784"></ins>
-  </div>
-
   <p id="selectedAdDebug" class="text-slate-300 text-[11px]"></p>
 </div>
 
@@ -298,8 +293,6 @@
   const adContentEl   = document.getElementById('adContentEl');
   const adContainerEl = document.getElementById('adContainerEl');
   const adLoadingState= document.getElementById('adLoadingState');
-  const imageAdWrap   = document.getElementById('imageAdWrap');
-  const imageAdIns    = document.getElementById('imageAdIns');
   const ageGateOverlay= document.getElementById('ageGateOverlay');
   const ageGateYes    = document.getElementById('ageGateYes');
   const ageGateNo     = document.getElementById('ageGateNo');
@@ -343,13 +336,6 @@
   // 通常の広告読み込み+再生時間よりは十分長く、かつ視聴者を無限に待たせないための値。
   // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
   const MAX_AD_WAIT_MS = 25000;
-  // 画像ギャラリーは動画のような「視聴完了」イベントが無い広告(ExoClick AdProvider)を使うため、
-  // 表示してから固定秒数後に自動でアンロックする。フルページインタースティシャル広告は
-  // クリエイティブの読み込みに時間がかかることがあるため、広告が表示し切る前に
-  // アンロックしてしまわないよう、動画側の広告と同程度の余裕を持たせている。
-  const IMAGE_AD_DISPLAY_MS = 8000;
-  // 画像側の広告コード(ExoClickゾーンID)が未設定の場合のフォールバック
-  const DEFAULT_IMAGE_AD_ZONE_ID = '5968784';
   // 管理画面(/admin)からリンクが設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_LINK = 'https://fantia.jp/';
   // 管理画面(/admin)からボタンの文字が設定されていない場合のフォールバック
@@ -485,16 +471,10 @@
     overlay.classList.remove('hidden-el');
     selectedAdDebug.textContent = '';
 
-    // 広告A(ads[0])=動画側、広告B(ads[1])=画像側に完全に振り分ける(A/Bランダム表示ではない)
-    const selectedAd = pickAdForContentType(siteAds, currentContentType);
+    // 画像ギャラリーも動画と同じ広告(VASTタグ)を、同じIMA SDKの仕組みで再生する
+    // (画像専用の広告枠は廃止し、動画側の広告設定をそのまま使う)。
+    const selectedAd = siteAds[0] || { adCode: '' };
 
-    if (currentContentType === 'image') {
-      adPlayerWrap.classList.add('hidden-el');
-      startImageAd(selectedAd);
-      return;
-    }
-
-    imageAdWrap.classList.add('hidden-el');
     adPlayerWrap.classList.remove('hidden-el');
     adLoadingState.classList.remove('hidden-el');
 
@@ -525,24 +505,6 @@
     // 広告ネットワークからの応答自体が来ずADS_MANAGER_LOADED/AD_ERRORのどちらも
     // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限。
     setTimeout(onAdFinished, MAX_AD_WAIT_MS);
-  }
-
-  // 画像ギャラリーのアンロック広告(ExoClick AdProvider)。
-  // バナー/ネイティブ広告には動画のような「視聴完了」イベントが無いため、
-  // 表示してから固定秒数(IMAGE_AD_DISPLAY_MS)後に自動でアンロックする。
-  function startImageAd(selectedAd) {
-    imageAdWrap.classList.remove('hidden-el');
-    imageAdIns.setAttribute('data-zoneid', (selectedAd && selectedAd.adCode) || DEFAULT_IMAGE_AD_ZONE_ID);
-
-    (window.AdProvider = window.AdProvider || []).push({ serve: {} });
-
-    setTimeout(onAdFinished, IMAGE_AD_DISPLAY_MS);
-  }
-
-  // 広告A(index 0)=動画側、広告B(index 1)=画像側に完全に振り分ける。
-  function pickAdForContentType(ads, contentType) {
-    const index = contentType === 'image' ? 1 : 0;
-    return ads[index] || ads[0] || { adCode: '' };
   }
 
   function onAdFinished() {

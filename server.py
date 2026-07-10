@@ -1644,6 +1644,7 @@ class Handler(BaseHTTPRequestHandler):
             if v.get("owner_creator_id") == creator_id
             and video_file_path(v)
             and not get_time_limit_status(v)["expired"]
+            and not v.get("unlisted")
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -1781,6 +1782,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_creator_reorder_images()
+        elif path == "/api/creator/content/set-unlisted":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_set_unlisted()
         elif path == "/api/creator/request-redemption":
             if self.require_creator_auth():
                 return
@@ -2651,6 +2656,37 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True})
 
+    def handle_creator_set_unlisted(self):
+        """投稿を自分の投稿一覧ページ(/creator-posts/<id>)から表示するかどうかを切り替える。
+
+        あくまで一覧への掲載可否だけの設定であり、共有リンク(/?v=<id>)自体は
+        従来通り誰でも開ける(「限定公開」的に、リンクを知っている人にだけ見せたい
+        投稿向け)。
+        """
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video or video.get("owner_creator_id") != creator_id:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            video["unlisted"] = bool(data.get("unlisted"))
+            save_videos(videos)
+
+        self.respond_json(200, {"ok": True, "unlisted": video["unlisted"]})
+
     def handle_creator_video_source(self, query):
         """サムネイル自動生成(動画の1フレームをキャプチャ)用に、本人の動画本体を返す。
 
@@ -3076,6 +3112,7 @@ class Handler(BaseHTTPRequestHandler):
                     if v.get("content_type") == "image"
                     else None
                 ),
+                "unlisted": bool(v.get("unlisted")),
             }
             for v in own_videos
         ]

@@ -547,6 +547,9 @@
     if (item.contentType === 'image') {
       addBadge('画像ギャラリー（' + (item.imageCount || 0) + '枚）', 'bg-violet-50 text-violet-700');
     }
+    if (item.unlisted) {
+      addBadge('限定公開（一覧非表示）', 'bg-amber-50 text-amber-700');
+    }
     addBadge('視聴回数: ' + (item.viewCount || 0), 'bg-slate-100 text-slate-500');
 
     const psLabel = pointsStatusLabel(item.pointsStatus);
@@ -580,6 +583,7 @@
     });
     linkRow.appendChild(copyBtn);
     body.appendChild(linkRow);
+    body.appendChild(buildUnlistedToggle(item));
     body.appendChild(buildThumbnailSection(item));
     if (item.contentType === 'image') {
       body.appendChild(buildImageReorderSection(item));
@@ -764,6 +768,55 @@
     });
 
     wrap.appendChild(body);
+    return wrap;
+  }
+
+  function buildUnlistedToggle(item) {
+    const wrap = document.createElement('label');
+    wrap.className = 'flex items-start gap-2 text-xs border border-slate-100 rounded-lg px-3 py-2';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!item.unlisted;
+    checkbox.className = 'w-4 h-4 mt-0.5';
+    wrap.appendChild(checkbox);
+
+    const textWrap = document.createElement('span');
+    const title = document.createElement('span');
+    title.className = 'block text-slate-600 font-medium';
+    title.textContent = '自分の投稿一覧ページに表示しない（限定公開）';
+    textWrap.appendChild(title);
+    const hint = document.createElement('span');
+    hint.className = 'block text-[11px] text-slate-400 mt-0.5';
+    hint.textContent = 'チェックしても、このURLを直接知っている人は今まで通り閲覧できます。';
+    textWrap.appendChild(hint);
+    wrap.appendChild(textWrap);
+
+    checkbox.addEventListener('change', () => {
+      checkbox.disabled = true;
+      fetch('/api/creator/content/set-unlisted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, unlisted: checkbox.checked }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshContentList();
+          } else {
+            checkbox.checked = !checkbox.checked;
+            checkbox.disabled = false;
+            alert('更新に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          checkbox.checked = !checkbox.checked;
+          checkbox.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+
     return wrap;
   }
 

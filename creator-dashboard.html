@@ -103,8 +103,6 @@
     <div id="redemptionHistoryBox" class="flex flex-col gap-1"></div>
   </form>
 
-  <p id="dailyUploadStatusText" class="text-xs text-slate-400"></p>
-
   <p id="uploadBlockedMsg" class="hidden card rounded-2xl p-4 text-sm text-rose-500">
     アップロードには身分証の承認が必要です。上の「年齢確認」から提出してください。
   </p>
@@ -184,7 +182,6 @@
   const pointsBalanceCard = document.getElementById('pointsBalanceCard');
   const pointsBalanceText = document.getElementById('pointsBalanceText');
   const pointsYenText = document.getElementById('pointsYenText');
-  const dailyUploadStatusText = document.getElementById('dailyUploadStatusText');
   const uploadBlockedMsg = document.getElementById('uploadBlockedMsg');
 
   const idVerificationStatusText = document.getElementById('idVerificationStatusText');
@@ -261,8 +258,6 @@
         return '対応していないファイル形式です。';
       case 'file_too_large':
         return 'ファイルサイズが大きすぎます。';
-      case 'daily_upload_limit_reached':
-        return '本日のアップロード上限（' + (data.maxUploadsPerDay || 2) + '件）に達しました。日付が変わってから再度お試しください。';
       default:
         return null;
     }
@@ -570,6 +565,9 @@
     linkRow.appendChild(copyBtn);
     body.appendChild(linkRow);
     body.appendChild(buildThumbnailSection(item));
+    if (item.contentType === 'image') {
+      body.appendChild(buildImageReorderSection(item));
+    }
     body.appendChild(buildCtaTextSection(item));
 
     const deleteBtn = document.createElement('button');
@@ -642,6 +640,115 @@
         reject(new Error('video load failed'));
       });
     });
+  }
+
+  function buildImageReorderSection(item) {
+    const wrap = document.createElement('details');
+    wrap.className = 'text-xs border border-slate-100 rounded-lg';
+
+    const summary = document.createElement('summary');
+    summary.className = 'cursor-pointer select-none px-3 py-2 font-medium text-teal-600';
+    summary.textContent = '画像の並び替え';
+    wrap.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'flex flex-col gap-2 px-3 pb-3';
+
+    const hint = document.createElement('p');
+    hint.className = 'text-[11px] text-slate-400';
+    hint.textContent = '↑↓で順番を入れ替えて「適用」を押してください。';
+    body.appendChild(hint);
+
+    const list = document.createElement('div');
+    list.className = 'flex flex-col gap-1';
+    body.appendChild(list);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs min-h-[1em]';
+    body.appendChild(msg);
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.textContent = '適用';
+    applyBtn.className = 'self-start border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+    body.appendChild(applyBtn);
+
+    const imageUrls = item.imageUrls || [];
+    let order = imageUrls.map((_, i) => i);
+
+    function renderList() {
+      list.innerHTML = '';
+      order.forEach((originalIndex, position) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 border border-slate-100 rounded-lg p-1.5';
+
+        const img = document.createElement('img');
+        img.src = imageUrls[originalIndex];
+        img.className = 'w-12 h-12 rounded object-cover shrink-0';
+        img.alt = '';
+        row.appendChild(img);
+
+        const posText = document.createElement('span');
+        posText.className = 'text-[11px] text-slate-400 flex-1';
+        posText.textContent = (position + 1) + '枚目';
+        row.appendChild(posText);
+
+        const upBtn = document.createElement('button');
+        upBtn.type = 'button';
+        upBtn.textContent = '↑';
+        upBtn.disabled = position === 0;
+        upBtn.className = 'border border-slate-200 rounded px-2 py-1 text-xs disabled:opacity-30';
+        upBtn.addEventListener('click', () => {
+          [order[position - 1], order[position]] = [order[position], order[position - 1]];
+          renderList();
+        });
+        row.appendChild(upBtn);
+
+        const downBtn = document.createElement('button');
+        downBtn.type = 'button';
+        downBtn.textContent = '↓';
+        downBtn.disabled = position === order.length - 1;
+        downBtn.className = 'border border-slate-200 rounded px-2 py-1 text-xs disabled:opacity-30';
+        downBtn.addEventListener('click', () => {
+          [order[position + 1], order[position]] = [order[position], order[position + 1]];
+          renderList();
+        });
+        row.appendChild(downBtn);
+
+        list.appendChild(row);
+      });
+    }
+    renderList();
+
+    applyBtn.addEventListener('click', () => {
+      msg.textContent = '';
+      msg.className = 'text-xs min-h-[1em]';
+      applyBtn.disabled = true;
+      fetch('/api/creator/content/reorder-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, order: order }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshContentList();
+          } else {
+            applyBtn.disabled = false;
+            msg.textContent = '並び替えに失敗しました（' + (data.error || status) + '）';
+            msg.className = 'text-xs text-rose-500';
+          }
+        })
+        .catch(() => {
+          applyBtn.disabled = false;
+          msg.textContent = '通信エラーが発生しました。';
+          msg.className = 'text-xs text-rose-500';
+        });
+    });
+
+    wrap.appendChild(body);
+    return wrap;
   }
 
   function buildThumbnailSection(item) {
@@ -926,11 +1033,6 @@
             refreshPointsBox();
           }
           updateIdVerificationUI(data.idVerificationStatus, data.idRejectionReason);
-
-          if (typeof data.maxUploadsPerDay === 'number') {
-            dailyUploadStatusText.textContent =
-              '本日のアップロード: ' + (data.uploadsToday || 0) + ' / ' + data.maxUploadsPerDay + '件（日付が変わるとリセットされます）';
-          }
         }
       })
       .catch(() => {});

@@ -397,10 +397,6 @@ def points_to_yen(points):
 MIN_CREATOR_VIDEO_DURATION_SECONDS = 30
 MIN_CREATOR_IMAGE_COUNT = 5
 
-# クリエイターのセルフアップロードは1日(サーバーのローカル日付基準。動画/画像の合計)に
-# この件数まで。管理者自身の/api/uploadには適用しない。
-MAX_CREATOR_UPLOADS_PER_DAY = 2
-
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
 CREATORS_LOCK = threading.Lock()
@@ -448,33 +444,6 @@ def find_creator_by_magic_link_token(creators, invite_token):
         (c for c in creators if c.get("invite_token") == invite_token and c.get("auth_mode") == "magic_link"),
         None,
     )
-
-
-def check_and_increment_daily_upload_count(creator):
-    """クリエイターの1日の合計アップロード件数(動画/画像の合計)をチェックし、
-
-    上限内であれば+1して記録しTrueを返す。既に上限に達していればFalseを返す
-    (呼び出し側はアップロードを拒否する)。日付が変わっていれば0からリセットしてから判定する。
-    「1日」はサーバーのローカル日付(このVPSはAsia/Tokyoに設定済み)を基準にする。
-    """
-    today = time.strftime("%Y-%m-%d")
-    if creator.get("upload_count_date") != today:
-        creator["upload_count_date"] = today
-        creator["upload_count_today"] = 0
-
-    if creator.get("upload_count_today", 0) >= MAX_CREATOR_UPLOADS_PER_DAY:
-        return False
-
-    creator["upload_count_today"] = creator.get("upload_count_today", 0) + 1
-    return True
-
-
-def get_todays_upload_count(creator):
-    """表示用に、加算はせず本日のアップロード件数だけを返す。"""
-    today = time.strftime("%Y-%m-%d")
-    if creator.get("upload_count_date") != today:
-        return 0
-    return creator.get("upload_count_today", 0)
 
 
 def hash_password(password, salt_hex=None):
@@ -1804,6 +1773,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_creator_reset_thumbnail()
+        elif path == "/api/creator/content/reorder-images":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_reorder_images()
         elif path == "/api/creator/request-redemption":
             if self.require_creator_auth():
                 return
@@ -2298,32 +2271,6 @@ class Handler(BaseHTTPRequestHandler):
         creator_id = self.get_creator_id()
         self._process_upload_request(owner_creator_id=creator_id)
 
-    def _enforce_creator_daily_upload_limit(self, owner_creator_id):
-        """クリエイターの1日の合計アップロード件数の上限をチェックする。
-
-        上限に達していて拒否すべき場合はエラーレスポンスを返してTrueを返す
-        (呼び出し側はこの後returnすること)。それ以外はFalseを返す。
-        管理者本人のアップロード(owner_creator_id無し)には適用しない。
-        """
-        if not owner_creator_id:
-            return False
-
-        with CREATORS_LOCK:
-            creators = load_creators()
-            creator = find_creator(creators, owner_creator_id)
-            if not creator:
-                self.respond_json(404, {"ok": False, "error": "creator_not_found"})
-                return True
-            if not check_and_increment_daily_upload_count(creator):
-                self.respond_json(400, {
-                    "ok": False,
-                    "error": "daily_upload_limit_reached",
-                    "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
-                })
-                return True
-            save_creators(creators)
-        return False
-
     def _process_upload_request(self, owner_creator_id):
         """multipart/form-dataを読んでバリデーションし、動画または画像ギャラリーを保存する。
 
@@ -2398,9 +2345,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.respond_json(413, {"ok": False, "error": "file_too_large"})
                     return
 
-            if self._enforce_creator_daily_upload_limit(owner_creator_id):
-                return
-
             content_id = secrets.token_urlsafe(9)
             image_filenames = []
             for index, image_file in enumerate(image_files):
@@ -2457,9 +2401,6 @@ class Handler(BaseHTTPRequestHandler):
                     "minVideoDurationSeconds": MIN_CREATOR_VIDEO_DURATION_SECONDS,
                 })
                 return
-
-        if self._enforce_creator_daily_upload_limit(owner_creator_id):
-            return
 
         video_id = secrets.token_urlsafe(9)
         stored_filename = video_id + ext
@@ -2656,6 +2597,48 @@ class Handler(BaseHTTPRequestHandler):
                 if os.path.exists(old_path):
                     os.remove(old_path)
             video.pop("og_image_filename", None)
+            save_videos(videos)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_creator_reorder_images(self):
+        """画像ギャラリーの表示順を変更する。
+
+        クライアントは実際のファイル名を知らない(/image/<id>/<index>という
+        位置ベースのURLしか渡していない)ため、「新しい並び順における元のindex」の
+        配列(例: [2, 0, 1])を受け取り、image_filenamesをその順に並べ替える。
+        元のindexの集合と完全に一致すること(過不足・重複が無いこと)を検証する。
+        """
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        order = data.get("order")
+
+        with VIDEOS_LOCK:
+            videos = load_videos()
+            video = next((v for v in videos if v["id"] == data.get("id")), None)
+            if not video or video.get("owner_creator_id") != creator_id or video.get("content_type") != "image":
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            image_filenames = video.get("image_filenames") or []
+            if (
+                not isinstance(order, list)
+                or sorted(order) != list(range(len(image_filenames)))
+            ):
+                self.respond_json(400, {"ok": False, "error": "invalid_order"})
+                return
+
+            video["image_filenames"] = [image_filenames[i] for i in order]
             save_videos(videos)
 
         self.respond_json(200, {"ok": True})
@@ -3080,6 +3063,11 @@ class Handler(BaseHTTPRequestHandler):
                 "effectiveCtaLink": get_effective_cta(v, config, creator)["premiumLink"],
                 "hasThumbnail": bool(v.get("og_image_filename")),
                 "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
+                "imageUrls": (
+                    ["/image/" + v["id"] + "/" + str(i) for i in range(len(v.get("image_filenames") or []))]
+                    if v.get("content_type") == "image"
+                    else None
+                ),
             }
             for v in own_videos
         ]
@@ -3101,8 +3089,6 @@ class Handler(BaseHTTPRequestHandler):
             "redemptionRequests": [
                 serialize_redemption_request(r) for r in creator.get("redemption_requests", [])
             ],
-            "uploadsToday": get_todays_upload_count(creator),
-            "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
             "idVerificationStatus": creator.get("id_verification_status", "not_submitted"),
             "idRejectionReason": creator.get("id_rejection_reason"),
         })
@@ -3177,8 +3163,6 @@ class Handler(BaseHTTPRequestHandler):
                 "pointsPerVideoUpload": c.get("points_per_video_upload"),
                 "pointsPerImageUpload": c.get("points_per_image_upload"),
                 "contactUrl": c.get("contact_url"),
-                "uploadsToday": get_todays_upload_count(c),
-                "maxUploadsPerDay": MAX_CREATOR_UPLOADS_PER_DAY,
                 "idVerificationStatus": c.get("id_verification_status", "not_submitted"),
                 "hasIdDocument": bool(c.get("id_document_filename")),
                 "idDocumentType": c.get("id_document_type"),

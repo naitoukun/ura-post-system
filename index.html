@@ -267,6 +267,11 @@
   <p id="selectedAdDebug" class="text-slate-300 text-[11px]"></p>
 </div>
 
+<!-- 画像ギャラリーの全画面表示用ライトボックス -->
+<div id="imageLightbox" class="hidden-el fixed inset-0 z-[110] bg-black/95 flex items-center justify-center p-2">
+  <img id="imageLightboxImg" src="" alt="" class="max-w-full max-h-full object-contain" draggable="false" oncontextmenu="return false;">
+</div>
+
 <script>
 (function () {
   const unlockBtn   = document.getElementById('unlockBtn');
@@ -296,6 +301,17 @@
   const ageGateOverlay= document.getElementById('ageGateOverlay');
   const ageGateYes    = document.getElementById('ageGateYes');
   const ageGateNo     = document.getElementById('ageGateNo');
+  const imageLightbox   = document.getElementById('imageLightbox');
+  const imageLightboxImg= document.getElementById('imageLightboxImg');
+
+  function openImageLightbox(src) {
+    imageLightboxImg.src = src;
+    imageLightbox.classList.remove('hidden-el');
+  }
+  imageLightbox.addEventListener('click', () => {
+    imageLightbox.classList.add('hidden-el');
+    imageLightboxImg.src = '';
+  });
 
   ageGateYes.addEventListener('click', () => {
     localStorage.setItem('ageVerified', '1');
@@ -541,11 +557,13 @@
         const count = info.imageCount || 0;
         for (let i = 0; i < count; i++) {
           const img = document.createElement('img');
-          img.src = '/image/' + encodeURIComponent(info.id) + '/' + i;
-          img.className = 'card w-full rounded-2xl';
+          const src = '/image/' + encodeURIComponent(info.id) + '/' + i;
+          img.src = src;
+          img.className = 'card w-full rounded-2xl cursor-zoom-in';
           img.loading = 'lazy';
           img.draggable = false;
           img.oncontextmenu = () => false;
+          img.addEventListener('click', () => openImageLightbox(src));
           imageGallery.appendChild(img);
         }
         return;

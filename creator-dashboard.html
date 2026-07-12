@@ -894,6 +894,135 @@
           });
       });
       body.appendChild(autoBtn);
+
+      const scrubWrap = document.createElement('details');
+      scrubWrap.className = 'border border-slate-100 rounded-lg';
+      const scrubSummary = document.createElement('summary');
+      scrubSummary.className = 'cursor-pointer select-none px-2 py-1.5 text-teal-600';
+      scrubSummary.textContent = '動画から場面を選ぶ';
+      scrubWrap.appendChild(scrubSummary);
+
+      const scrubBody = document.createElement('div');
+      scrubBody.className = 'flex flex-col gap-2 p-2';
+
+      const scrubVideo = document.createElement('video');
+      scrubVideo.controls = true;
+      scrubVideo.muted = true;
+      scrubVideo.playsInline = true;
+      scrubVideo.preload = 'metadata';
+      scrubVideo.className = 'w-full rounded-lg bg-black';
+      scrubBody.appendChild(scrubVideo);
+
+      const scrubBtn = document.createElement('button');
+      scrubBtn.type = 'button';
+      scrubBtn.textContent = 'この場面にする';
+      scrubBtn.className = 'self-start border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+      scrubBtn.addEventListener('click', () => {
+        scrubBtn.disabled = true;
+        const originalText = scrubBtn.textContent;
+        scrubBtn.textContent = '設定中…';
+        msg.textContent = '';
+        msg.className = 'text-xs min-h-[1em]';
+
+        const canvas = document.createElement('canvas');
+        canvas.width = scrubVideo.videoWidth;
+        canvas.height = scrubVideo.videoHeight;
+        canvas.getContext('2d').drawImage(scrubVideo, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            msg.textContent = 'フレームの取得に失敗しました。';
+            msg.className = 'text-xs text-rose-500';
+            scrubBtn.disabled = false;
+            scrubBtn.textContent = originalText;
+            return;
+          }
+          const formData = new FormData();
+          formData.append('id', item.id);
+          formData.append('thumbnail', blob, 'frame.jpg');
+          fetch('/api/creator/content/set-thumbnail', { method: 'POST', body: formData })
+            .then((res) => res.json().then((data) => ({ status: res.status, data })))
+            .then(({ status, data }) => {
+              if (redirectIfUnauthenticated(status)) return;
+              if (status === 200 && data.ok) {
+                refreshContentList();
+              } else {
+                msg.textContent = '設定に失敗しました（' + (data.error || status) + '）';
+                msg.className = 'text-xs text-rose-500';
+              }
+            })
+            .catch(() => {
+              msg.textContent = '通信エラーが発生しました。';
+              msg.className = 'text-xs text-rose-500';
+            })
+            .finally(() => {
+              scrubBtn.disabled = false;
+              scrubBtn.textContent = originalText;
+            });
+        }, 'image/jpeg', 0.85);
+      });
+      scrubBody.appendChild(scrubBtn);
+      scrubWrap.appendChild(scrubBody);
+      body.appendChild(scrubWrap);
+
+      scrubWrap.addEventListener('toggle', () => {
+        if (scrubWrap.open && !scrubVideo.src) {
+          scrubVideo.src = '/api/creator/content/video-source?id=' + encodeURIComponent(item.id);
+        }
+      });
+    }
+
+    if (item.contentType === 'image' && (item.imageUrls || []).length > 1) {
+      const galleryWrap = document.createElement('details');
+      galleryWrap.className = 'border border-slate-100 rounded-lg';
+      const gallerySummary = document.createElement('summary');
+      gallerySummary.className = 'cursor-pointer select-none px-2 py-1.5 text-teal-600';
+      gallerySummary.textContent = 'ギャラリーの画像から選ぶ';
+      galleryWrap.appendChild(gallerySummary);
+
+      const galleryGrid = document.createElement('div');
+      galleryGrid.className = 'grid grid-cols-4 gap-1.5 p-2';
+      item.imageUrls.forEach((url) => {
+        const thumbBtn = document.createElement('button');
+        thumbBtn.type = 'button';
+        thumbBtn.className = 'aspect-square rounded-lg overflow-hidden border border-slate-100 hover:border-teal-400';
+        const thumbImg = document.createElement('img');
+        thumbImg.src = url;
+        thumbImg.className = 'w-full h-full object-cover';
+        thumbImg.alt = '';
+        thumbBtn.appendChild(thumbImg);
+        thumbBtn.addEventListener('click', () => {
+          thumbBtn.disabled = true;
+          msg.textContent = '';
+          msg.className = 'text-xs min-h-[1em]';
+          fetch(url)
+            .then((res) => res.blob())
+            .then((blob) => {
+              const formData = new FormData();
+              formData.append('id', item.id);
+              formData.append('thumbnail', blob, 'gallery.jpg');
+              return fetch('/api/creator/content/set-thumbnail', { method: 'POST', body: formData });
+            })
+            .then((res) => res.json().then((data) => ({ status: res.status, data })))
+            .then(({ status, data }) => {
+              if (redirectIfUnauthenticated(status)) return;
+              if (status === 200 && data.ok) {
+                refreshContentList();
+              } else {
+                thumbBtn.disabled = false;
+                msg.textContent = '設定に失敗しました（' + (data.error || status) + '）';
+                msg.className = 'text-xs text-rose-500';
+              }
+            })
+            .catch(() => {
+              thumbBtn.disabled = false;
+              msg.textContent = '通信エラーが発生しました。';
+              msg.className = 'text-xs text-rose-500';
+            });
+        });
+        galleryGrid.appendChild(thumbBtn);
+      });
+      galleryWrap.appendChild(galleryGrid);
+      body.appendChild(galleryWrap);
     }
 
     const btnRow = document.createElement('div');

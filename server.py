@@ -47,7 +47,7 @@
 - POST /api/creator/logout
 - GET  /api/creator/content  自分がアップロードしたコンテンツの一覧(JSON、ポイント状況込み)※要クリエイターログイン
 - GET  /api/creators/me  自分のポイント残高・交換申請履歴(JSON)※要クリエイターログイン
-- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は30秒以上・画像は5枚以上が必須。
+- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は20秒以上・画像は5枚以上が必須。
                         1日あたりの合計アップロード件数にも上限あり）※要クリエイターログイン
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
 - POST /api/creator/content/set-cta-text  自分の投稿の誘導ボタン文言・リンク先の個別指定・解除（所有者チェック有り、JSON）※要クリエイターログイン
@@ -395,7 +395,7 @@ def points_to_yen(points):
 
 # 低品質・水増し目的の投稿を防ぐための最低ライン。クリエイターのセルフアップロードにのみ適用し
 # (管理者自身の/api/uploadには適用しない)、満たさない場合はアップロード自体を拒否する。
-MIN_CREATOR_VIDEO_DURATION_SECONDS = 30
+MIN_CREATOR_VIDEO_DURATION_SECONDS = 20
 MIN_CREATOR_IMAGE_COUNT = 5
 
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を

@@ -159,7 +159,7 @@
       <input id="fileInput" type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" required
         class="text-sm" />
     </label>
-    <p class="text-xs text-slate-400">動画は30秒以上、画像は5枚以上からアップロードできます（ポイント対象外の水増し投稿を防ぐためです）。</p>
+    <p class="text-xs text-slate-400">動画は20秒以上、画像は5枚以上からアップロードできます（ポイント対象外の水増し投稿を防ぐためです）。</p>
     <p class="text-xs text-slate-400">
       短い動画クリップを1本にまとめたい場合は、
       <a href="/video-merge-tool" target="_blank" rel="noopener noreferrer" class="text-teal-600 underline">動画結合ツール</a>
@@ -286,7 +286,7 @@
   function describeUploadError(data) {
     switch (data.error) {
       case 'video_too_short':
-        return '動画が短すぎます（' + (data.minVideoDurationSeconds || 30) + '秒以上が必要です）。';
+        return '動画が短すぎます（' + (data.minVideoDurationSeconds || 20) + '秒以上が必要です）。';
       case 'could_not_determine_video_length':
         return '動画の長さを判定できませんでした。別の形式（mp4推奨）でお試しください。';
       case 'too_few_images':

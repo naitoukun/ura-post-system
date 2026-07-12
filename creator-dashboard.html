@@ -66,6 +66,25 @@
     <p id="displayNameResultMsg" class="text-xs min-h-[1em]"></p>
   </div>
 
+  <div class="card rounded-2xl p-4 flex flex-col gap-2">
+    <span class="text-sm font-medium text-slate-700">応援ボタンの既定値</span>
+    <p class="text-xs text-slate-400">すべての投稿の応援ボタンに使う既定の文言・リンク先です。投稿ごとに個別設定している場合はそちらが優先されます。空欄なら文言は表示名から自動生成、リンク先はサイト既定になります。</p>
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-slate-500">ボタンの文言</span>
+      <input id="defaultCtaTextInput" type="text" maxlength="40" placeholder="例: ○○を応援する"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-slate-500">ボタンのリンク先URL</span>
+      <input id="defaultCtaLinkInput" type="url" placeholder="例: https://x.com/your_account"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+    <button id="defaultCtaSaveBtn" type="button" class="self-start border border-teal-500 text-teal-600 rounded-lg px-3 py-2 text-sm font-medium hover:bg-teal-50">
+      保存
+    </button>
+    <p id="defaultCtaResultMsg" class="text-xs min-h-[1em]"></p>
+  </div>
+
   <div id="pointsBalanceCard" class="card rounded-2xl p-4 flex flex-col gap-1">
     <span class="text-xs text-slate-400">現在のポイント残高</span>
     <span id="pointsBalanceText" class="points-count text-4xl font-extrabold text-teal-600">-</span>
@@ -195,6 +214,10 @@
   const displayNameInput = document.getElementById('displayNameInput');
   const displayNameSaveBtn = document.getElementById('displayNameSaveBtn');
   const displayNameResultMsg = document.getElementById('displayNameResultMsg');
+  const defaultCtaTextInput = document.getElementById('defaultCtaTextInput');
+  const defaultCtaLinkInput = document.getElementById('defaultCtaLinkInput');
+  const defaultCtaSaveBtn = document.getElementById('defaultCtaSaveBtn');
+  const defaultCtaResultMsg = document.getElementById('defaultCtaResultMsg');
   const pointsBalanceCard = document.getElementById('pointsBalanceCard');
   const pointsBalanceText = document.getElementById('pointsBalanceText');
   const pointsYenText = document.getElementById('pointsYenText');
@@ -1221,6 +1244,8 @@
         if (redirectIfUnauthenticated(status)) return;
         if (status === 200 && data.ok) {
           displayNameInput.value = data.displayName || '';
+          defaultCtaTextInput.value = data.defaultCtaButtonText || '';
+          defaultCtaLinkInput.value = data.defaultCtaLinkUrl || '';
           if (data.authMode === 'magic_link') {
             // ライト版はポイント制度を使わず、報酬は運営が個別に対応するため非表示にする
             pointsBalanceCard.classList.add('hidden');
@@ -1263,6 +1288,39 @@
         displayNameSaveBtn.disabled = false;
         displayNameResultMsg.textContent = '通信エラーが発生しました。';
         displayNameResultMsg.className = 'text-xs text-rose-500';
+      });
+  });
+
+  defaultCtaSaveBtn.addEventListener('click', () => {
+    defaultCtaResultMsg.textContent = '';
+    defaultCtaResultMsg.className = 'text-xs min-h-[1em]';
+    defaultCtaSaveBtn.disabled = true;
+    fetch('/api/creator/set-default-cta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ctaButtonText: defaultCtaTextInput.value,
+        ctaLinkUrl: defaultCtaLinkInput.value,
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        defaultCtaSaveBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          defaultCtaTextInput.value = data.defaultCtaButtonText || '';
+          defaultCtaLinkInput.value = data.defaultCtaLinkUrl || '';
+          defaultCtaResultMsg.textContent = '保存しました。';
+          defaultCtaResultMsg.className = 'text-xs text-teal-600';
+        } else {
+          defaultCtaResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          defaultCtaResultMsg.className = 'text-xs text-rose-500';
+        }
+      })
+      .catch(() => {
+        defaultCtaSaveBtn.disabled = false;
+        defaultCtaResultMsg.textContent = '通信エラーが発生しました。';
+        defaultCtaResultMsg.className = 'text-xs text-rose-500';
       });
   });
 

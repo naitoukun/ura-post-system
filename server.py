@@ -51,6 +51,7 @@
                         1日あたりの合計アップロード件数にも上限あり）※要クリエイターログイン
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
 - POST /api/creator/content/set-cta-text  自分の投稿の誘導ボタン文言・リンク先の個別指定・解除（所有者チェック有り、JSON）※要クリエイターログイン
+- POST /api/creator/set-default-cta  自分の全投稿に使う既定の誘導ボタン文言・リンク先の設定・解除（投稿ごとの個別指定があればそちらが優先、JSON）※要クリエイターログイン
 - POST /api/creator/request-redemption  貯まったポイントのギフト券交換を申請（最低申請ポイント数あり、JSON）※要クリエイターログイン
 - POST /api/creator/submit-id  年齢確認用の身分証提出・再提出（multipart/form-data）※要クリエイターログイン
 - GET  /api/creators     クリエイター一覧＋ポイント残高＋交換申請一覧（JSON）※要ログイン(管理者)
@@ -727,13 +728,15 @@ def get_effective_cta(video, config, creator=None):
 
     1. 投稿ごとの文言個別指定(cta_button_text)
     2. 出演者名+URL個別設定(creator_name+creator_url)がともにある場合、そのテンプレート文言
-    3. クリエイター自身の投稿(owner_creator_id有り)で、上記が無ければアカウントの表示名から自動生成
-    4. どれも無ければサイト既定の文言
+    3. クリエイター自身が自分のダッシュボードで設定した既定文言(default_cta_button_text)
+    4. クリエイター自身の投稿(owner_creator_id有り)で、上記が無ければアカウントの表示名から自動生成
+    5. どれも無ければサイト既定の文言
 
     リンク先は次の優先順位で決まる。
     1. 投稿ごとのリンク先個別指定(cta_link_url)
     2. 出演者名+URL個別設定(creator_name+creator_url)がともにある場合、そのURL
-    3. どれも無ければサイト既定のリンク
+    3. クリエイター自身が自分のダッシュボードで設定した既定リンク(default_cta_link_url)
+    4. どれも無ければサイト既定のリンク
     """
     cta_text_override = video.get("cta_button_text")
     cta_link_override = video.get("cta_link_url")
@@ -744,6 +747,8 @@ def get_effective_cta(video, config, creator=None):
         button_text = cta_text_override
     elif name and url:
         button_text = CREATOR_BUTTON_TEXT_TEMPLATE.format(name=name)
+    elif creator and creator.get("default_cta_button_text"):
+        button_text = creator["default_cta_button_text"]
     elif creator and creator.get("display_name"):
         button_text = CREATOR_BUTTON_TEXT_TEMPLATE.format(name=creator["display_name"])
     else:
@@ -753,6 +758,8 @@ def get_effective_cta(video, config, creator=None):
         premium_link = cta_link_override
     elif name and url:
         premium_link = url
+    elif creator and creator.get("default_cta_link_url"):
+        premium_link = creator["default_cta_link_url"]
     else:
         premium_link = config["premium_link"]
 
@@ -1770,6 +1777,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_creator_auth():
                 return
             self.handle_creator_set_display_name()
+        elif path == "/api/creator/set-default-cta":
+            if self.require_creator_auth():
+                return
+            self.handle_creator_set_default_cta()
         elif path == "/api/creator/content/set-thumbnail":
             if self.require_creator_auth():
                 return
@@ -2532,6 +2543,46 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {"ok": True, "ctaButtonText": cta_text, "ctaLinkUrl": cta_link})
 
+    def handle_creator_set_default_cta(self):
+        """自分の投稿全体に使う既定の誘導ボタン文言・リンク先を設定する。
+
+        投稿ごとの個別指定(cta_button_text/cta_link_url)がある投稿にはそちらが優先される。
+        """
+        creator_id = self.get_creator_id()
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        cta_text, error = validate_cta_button_text(data.get("ctaButtonText"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        cta_link, error = validate_cta_link_url(data.get("ctaLinkUrl"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            creator["default_cta_button_text"] = cta_text
+            creator["default_cta_link_url"] = cta_link
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "defaultCtaButtonText": cta_text, "defaultCtaLinkUrl": cta_link})
+
     def handle_creator_set_thumbnail(self):
         creator_id = self.get_creator_id()
         content_type_header = self.headers.get("Content-Type", "")
@@ -3130,6 +3181,8 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "authMode": creator.get("auth_mode", "password"),
             "displayName": creator.get("display_name"),
+            "defaultCtaButtonText": creator.get("default_cta_button_text"),
+            "defaultCtaLinkUrl": creator.get("default_cta_link_url"),
             "pointsBalance": creator.get("points_balance", 0),
             "pointsBalanceYen": points_to_yen(creator.get("points_balance", 0)),
             "redemptionRequests": [
@@ -3263,6 +3316,8 @@ class Handler(BaseHTTPRequestHandler):
                 "points_per_video_upload": None,
                 "points_per_image_upload": None,
                 "contact_url": contact_url,
+                "default_cta_button_text": None,
+                "default_cta_link_url": None,
                 "id_verification_status": "not_submitted",
                 "id_document_filename": None,
                 "id_document_type": None,

@@ -13,6 +13,7 @@
 - GET  /creator-terms    クリエイター向け利用規約（登録時に同意が必須）
 - GET  /recruit          クリエイター募集用のPRページ（ログイン不要、サイト内の他ページへのリンク無し）
 - GET  /og-image        SNSシェア時のOGP/Twitterカード用サイト共通画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
+- GET  /favicon.ico /favicon-32x32.png /apple-touch-icon.png  ファビコン一式（静的ファイル）
 - GET  /thumb/<id>      動画ごとに設定した個別サムネイル（未設定ならそもそも参照されない）
 - GET  /stats/<token>   クリエイター向けの視聴データページ（ログイン不要。共有リンクとは別トークン）
 - GET  /all-posts       現在公開中の全投稿URL一覧ページ（サイト内のどこからもリンクしていない。ログイン不要）
@@ -1267,6 +1268,12 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "recruit.html"), "text/html; charset=utf-8")
         elif path == "/og-image":
             self.handle_serve_og_image()
+        elif path == "/favicon.ico":
+            self.serve_file(os.path.join(BASE_DIR, "favicon.ico"), "image/x-icon")
+        elif path == "/favicon-32x32.png":
+            self.serve_file(os.path.join(BASE_DIR, "favicon-32x32.png"), "image/png")
+        elif path == "/apple-touch-icon.png":
+            self.serve_file(os.path.join(BASE_DIR, "apple-touch-icon.png"), "image/png")
         elif path.startswith("/thumb/"):
             self.handle_serve_thumbnail(path[len("/thumb/"):])
         elif path.startswith("/stats/"):

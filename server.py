@@ -15,6 +15,8 @@
 - GET  /og-image        SNSシェア時のOGP/Twitterカード用サイト共通画像（管理画面で差し替え可能。未設定時は同梱の既定画像）
 - GET  /thumb/<id>      動画ごとに設定した個別サムネイル（未設定ならそもそも参照されない）
 - GET  /stats/<token>   クリエイター向けの視聴データページ（ログイン不要。共有リンクとは別トークン）
+- GET  /all-posts       現在公開中の全投稿URL一覧ページ（サイト内のどこからもリンクしていない。ログイン不要）
+- GET  /api/all-posts   上記ページ用のJSON（削除済み・24時間限定で期限切れの投稿は除外）
 - POST /api/login       パスフレーズ+TOTPコードでログインし、セッションCookieを発行
 - POST /api/logout      ログアウト（セッションを破棄）
 - GET  /api/videos      アップロード済み動画の一覧 (JSON) ※要ログイン
@@ -1273,6 +1275,12 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_serve_creator_posts_page(path[len("/creator-posts/"):])
         elif path == "/api/creator-posts":
             self.handle_api_creator_posts(parse_qs(split.query))
+        elif path == "/all-posts":
+            # サイト内のどこからもリンクしていない、現在公開中の投稿URL一覧ページ。
+            # URLを直接知っている人(管理者)だけが使う想定。
+            self.serve_file(os.path.join(BASE_DIR, "all-posts.html"), "text/html; charset=utf-8")
+        elif path == "/api/all-posts":
+            self.handle_api_all_posts()
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -1664,6 +1672,39 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for v in items[:60]
             ]
+        })
+
+    def handle_api_all_posts(self):
+        """サイト全体で現在アクセス可能な投稿のURL一覧を返す(公開・認証不要)。
+
+        削除済み(実体ファイルが無い)・24時間限定で期限切れの投稿は除外する。
+        どのページからもリンクしていない(このURLを直接知っている人だけが使う)想定。
+        """
+        creators = load_creators()
+        videos_list = load_videos()
+        items = [
+            v for v in videos_list
+            if video_file_path(v)
+            and not get_time_limit_status(v)["expired"]
+        ]
+        items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
+
+        self.respond_json(200, {
+            "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "items": [
+                {
+                    "id": v["id"],
+                    "url": PUBLIC_SITE_URL + "/?v=" + v["id"],
+                    "contentType": v.get("content_type", "video"),
+                    "creatorDisplayName": (
+                        find_creator(creators, v.get("owner_creator_id")).get("display_name")
+                        if v.get("owner_creator_id") and find_creator(creators, v.get("owner_creator_id"))
+                        else None
+                    ),
+                    "uploadedAt": v.get("uploaded_at"),
+                }
+                for v in items
+            ],
         })
 
     def handle_serve_unlock_page(self, query):

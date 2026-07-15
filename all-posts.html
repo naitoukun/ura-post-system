@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>公開中の投稿URL一覧 | ura-post.com</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#7fccc0;
+    --accent-teal-dark:#4a9d90;
+    --bg-page:#faf3ea;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0;
+    background:var(--bg-page);
+    font-family:'Noto Sans JP',sans-serif;
+    color:#333;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #efe6d8;
+    box-shadow:0 4px 20px rgba(120,90,50,0.08);
+  }
+  .brand{
+    font-family:'Outfit','Noto Sans JP',sans-serif;
+    font-weight:800;
+    letter-spacing:-0.02em;
+  }
+  .brand-accent{
+    color:var(--accent-teal-dark);
+  }
+  .hidden-el{ display:none !important; }
+  a.post-link{
+    color:var(--accent-teal-dark);
+    word-break:break-all;
+  }
+  .badge{
+    display:inline-block;
+    font-size:11px;
+    padding:2px 8px;
+    border-radius:999px;
+    background:#f1f8f6;
+    color:var(--accent-teal-dark);
+    flex-shrink:0;
+  }
+</style>
+</head>
+<body style="padding:1rem;">
+
+<div style="width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:1rem;padding:1rem 0;">
+  <div>
+    <h1 class="brand" style="font-size:1.25rem;margin:0;"><span style="color:#1e293b;">URA-POST</span><span class="brand-accent">.COM</span></h1>
+    <p style="font-size:12px;color:#a89a86;margin:4px 0 0;">現在公開中の投稿URL一覧（このページはサイト内のどこからもリンクされていません）</p>
+  </div>
+
+  <p id="metaText" style="font-size:12px;color:#a89a86;margin:0;"></p>
+  <div id="loadingText" style="font-size:14px;color:#94a3b8;">読み込み中…</div>
+  <div id="emptyText" class="hidden-el" style="font-size:14px;color:#94a3b8;">現在公開中の投稿がありません。</div>
+  <div id="postsList" style="display:flex;flex-direction:column;gap:8px;"></div>
+</div>
+
+<script>
+(function () {
+  const metaText = document.getElementById('metaText');
+  const loadingText = document.getElementById('loadingText');
+  const emptyText = document.getElementById('emptyText');
+  const postsList = document.getElementById('postsList');
+
+  fetch('/api/all-posts', { cache: 'no-store' })
+    .then((res) => res.json())
+    .then((data) => {
+      loadingText.classList.add('hidden-el');
+      const items = (data && data.items) || [];
+      metaText.textContent = '件数: ' + items.length + '件（' + (data.generatedAt || '') + ' 時点）';
+
+      if (!items.length) {
+        emptyText.classList.remove('hidden-el');
+        return;
+      }
+
+      items.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'card';
+        row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:10px;';
+
+        const topLine = document.createElement('div');
+        topLine.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'badge';
+        typeBadge.textContent = item.contentType === 'image' ? '画像' : '動画';
+        topLine.appendChild(typeBadge);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.style.cssText = 'font-size:12px;color:#7a7168;';
+        nameSpan.textContent = item.creatorDisplayName || '(管理者アップロード)';
+        topLine.appendChild(nameSpan);
+
+        const dateSpan = document.createElement('span');
+        dateSpan.style.cssText = 'font-size:11px;color:#a89a86;margin-left:auto;';
+        dateSpan.textContent = item.uploadedAt || '';
+        topLine.appendChild(dateSpan);
+
+        row.appendChild(topLine);
+
+        const link = document.createElement('a');
+        link.className = 'post-link';
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.style.fontSize = '13px';
+        link.textContent = item.url;
+        row.appendChild(link);
+
+        postsList.appendChild(row);
+      });
+    })
+    .catch(() => {
+      loadingText.classList.add('hidden-el');
+      emptyText.classList.remove('hidden-el');
+    });
+})();
+</script>
+
+</body>
+</html>

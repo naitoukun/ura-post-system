@@ -110,6 +110,11 @@
 
         row.appendChild(topLine);
 
+        const statsLine = document.createElement('div');
+        statsLine.style.cssText = 'font-size:11px;color:#a89a86;';
+        statsLine.textContent = '有効視聴回数: ' + (item.viewCount || 0) + ' / 総アクセス数: ' + (item.rawViewCount || 0);
+        row.appendChild(statsLine);
+
         const link = document.createElement('a');
         link.className = 'post-link';
         link.href = item.url;

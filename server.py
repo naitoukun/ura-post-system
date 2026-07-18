@@ -1713,6 +1713,8 @@ class Handler(BaseHTTPRequestHandler):
                         else None
                     ),
                     "uploadedAt": v.get("uploaded_at"),
+                    "viewCount": v.get("view_count", 0),
+                    "rawViewCount": v.get("raw_view_count", 0),
                 }
                 for v in items
             ],

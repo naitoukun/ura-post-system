@@ -50,8 +50,7 @@
 - POST /api/creator/logout
 - GET  /api/creator/content  自分がアップロードしたコンテンツの一覧(JSON、ポイント状況込み)※要クリエイターログイン
 - GET  /api/creators/me  自分のポイント残高・交換申請履歴(JSON)※要クリエイターログイン
-- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は20秒以上・画像は5枚以上が必須。
-                        1日あたりの合計アップロード件数にも上限あり）※要クリエイターログイン
+- POST /api/creator/upload  動画/画像ギャラリーのセルフアップロード（動画は20秒以上・画像は5枚以上が必須）※要クリエイターログイン
 - POST /api/creator/content/delete  自分のコンテンツの削除（所有者チェック有り）※要クリエイターログイン
 - POST /api/creator/content/set-cta-text  自分の投稿の誘導ボタン文言・リンク先の個別指定・解除（所有者チェック有り、JSON）※要クリエイターログイン
 - POST /api/creator/set-default-cta  自分の全投稿に使う既定の誘導ボタン文言・リンク先の設定・解除（投稿ごとの個別指定があればそちらが優先、JSON）※要クリエイターログイン
@@ -129,8 +128,10 @@ TOTP_SECRET = os.environ.get("TOTP_SECRET", "TUGSIULMQWTNMATI")
 
 # クリエイターの生年月日(年齢確認の承認後も保持する個人情報)を暗号化して保存するための鍵。
 # 本番ではVPSの環境変数 PII_ENCRYPTION_KEY で上書きすること(systemdのEnvironment=で設定済み)。
-# ここに書かれているのはローカル動作確認用の仮の値で、本番用の鍵とは別物。
-PII_ENCRYPTION_KEY = os.environ.get("PII_ENCRYPTION_KEY", "oNiALWHFa4gZOnQfEn94vNQRvHSpmYPWqX4pwBEjaiQ=")
+# 未設定時はプロセス起動のたびにランダムな鍵を生成する(固定のフォールバック値をコードに
+# 埋め込むと、その値がgit履歴に残り続け、環境変数の設定を忘れた場合に暗号化が無意味になる
+# ため)。ローカル動作確認では、再起動するとそれまで保存したPIIが復号できなくなる点に注意。
+PII_ENCRYPTION_KEY = os.environ.get("PII_ENCRYPTION_KEY") or Fernet.generate_key().decode("ascii")
 _pii_fernet = Fernet(PII_ENCRYPTION_KEY.encode("ascii"))
 
 
@@ -274,12 +275,17 @@ def strip_image_metadata(content, ext):
     向き(Orientationタグ)だけは画素に焼き込んでから捨てる(単純に除去すると
     横向き撮影の画像が縦のまま表示されてしまうため)。GIFはアニメーションの
     コマが壊れる恐れがあり、かつそもそもExifを持つ形式ではないため対象外とする。
-    パースに失敗した場合はアップロード自体を失敗させないよう、元のバイト列を返す。
+
+    戻り値はNoneまたは処理後のバイト列。画像として読めなかった場合はNoneを返す
+    (拡張子だけ画像で中身が画像でないファイルをそのまま保存しないよう、
+    呼び出し側でアップロード自体を拒否すること。元のバイト列で「失敗を握りつぶして
+    そのまま保存」はしない)。
     """
     if ext not in (".jpg", ".jpeg", ".png", ".webp"):
         return content
     try:
         img = Image.open(io.BytesIO(content))
+        img.load()
         if getattr(img, "is_animated", False):
             return content
         img = ImageOps.exif_transpose(img)
@@ -294,8 +300,8 @@ def strip_image_metadata(content, ext):
             img.save(output, format="WEBP", quality=92)
         return output.getvalue()
     except Exception:
-        print("WARNING: strip_image_metadata failed, keeping original bytes:", ext)
-        return content
+        print("WARNING: strip_image_metadata failed to parse upload as image:", ext)
+        return None
 
 # クリエイターの年齢確認用の身分証提出。18歳未満のコンテンツを扱わないための本人確認であり、
 # 承認(id_verification_status == "approved")されるまでセルフアップロードはできない。
@@ -387,6 +393,16 @@ MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH = 100
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def json_for_script(value):
+    """<script>タグの中にそのまま埋め込んでも安全なJSON文字列を返す。
+
+    json.dumpsは"<"をエスケープしないため、値の中に"</script>"のような文字列が
+    含まれていると、そこでscriptタグが閉じられHTMLとして解釈されてしまう
+    (JSON-in-scriptの定番の穴)。"<"だけ\\u003cに変換して防ぐ。
+    """
+    return json.dumps(value).replace("<", "\\u003c")
 
 # ---------- クリエイター（女の子）アカウント / ポイント・ギフト券システム ----------
 # 招待制のセルフアップロードアカウント。管理者アカウントとは完全に別のセッション・
@@ -1158,6 +1174,13 @@ class Handler(BaseHTTPRequestHandler):
         # デフォルトのアクセスログのみ標準出力へ
         print("[server]", self.address_string(), format % args)
 
+    def end_headers(self):
+        # ブラウザによるContent-Typeの推測(スニッフィング)を止める。拡張子だけ画像/動画で
+        # 中身が異なるファイルが万一保存された場合でも、text/html等として解釈されて
+        # 実行されるのを防ぐための保険(全レスポンス共通でここに一箇所だけ書けば済む)。
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
     # ---------- 認証(セッションCookie) ----------
     def is_authenticated(self):
         cookies = parse_cookies(self.headers.get("Cookie"))
@@ -1674,9 +1697,16 @@ class Handler(BaseHTTPRequestHandler):
         他のクリエイターへは遷移できないよう、常にこの1人分のcreator_idに
         スコープしたままにする(一覧データ自体は/api/creator-postsで別途取得)。
         """
+        if not creator_id or not VIDEO_ID_RE.match(creator_id):
+            # URLのこの部分はページ内のJSON(script内)にそのまま埋め込むため、
+            # 想定外の文字(<等)を含む値がここで弾かれずに通ると埋め込み時の
+            # エスケープに不備があった場合にXSSにつながりうる。存在しないIDと
+            # 同様に404にしてしまい、形式の時点で弾く。
+            self.send_error(404, "Not Found")
+            return
         with open(os.path.join(BASE_DIR, "creator-posts.html"), "r", encoding="utf-8") as f:
             page_html = f.read()
-        page_html = page_html.replace("{{CREATOR_ID_JSON}}", json.dumps(creator_id))
+        page_html = page_html.replace("{{CREATOR_ID_JSON}}", json_for_script(creator_id))
 
         body = page_html.encode("utf-8")
         self.send_response(200)
@@ -2330,6 +2360,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
                 return
 
+            processed = strip_image_metadata(image_file["content"], ext)
+            if processed is None:
+                self.respond_json(400, {"ok": False, "error": "invalid_image_file"})
+                return
+
             # 拡張子が変わった場合に前のサムネイルが残らないよう、既存分は一旦削除する
             old_filename = video.get("og_image_filename")
             if old_filename:
@@ -2339,7 +2374,7 @@ class Handler(BaseHTTPRequestHandler):
 
             new_filename = "thumb_" + video["id"] + ext
             with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-                f.write(strip_image_metadata(image_file["content"], ext))
+                f.write(processed)
 
             video["og_image_filename"] = new_filename
             save_videos(videos)
@@ -2447,6 +2482,7 @@ class Handler(BaseHTTPRequestHandler):
                     "minImageCount": MIN_CREATOR_IMAGE_COUNT,
                 })
                 return
+            processed_contents = []
             for image_file in image_files:
                 ext = os.path.splitext(image_file["filename"] or "")[1].lower()
                 if ext not in IMAGE_ALLOWED_EXTENSIONS:
@@ -2455,6 +2491,13 @@ class Handler(BaseHTTPRequestHandler):
                 if len(image_file["content"]) > MAX_IMAGE_BYTES:
                     self.respond_json(413, {"ok": False, "error": "file_too_large"})
                     return
+                # 1枚でも画像として読めないファイルがあれば、他の分もまとめて
+                # 書き込む前にアップロード全体を拒否する(部分的な保存を避けるため)。
+                processed = strip_image_metadata(image_file["content"], ext)
+                if processed is None:
+                    self.respond_json(400, {"ok": False, "error": "invalid_image_file"})
+                    return
+                processed_contents.append(processed)
 
             content_id = secrets.token_urlsafe(9)
             image_filenames = []
@@ -2462,7 +2505,7 @@ class Handler(BaseHTTPRequestHandler):
                 ext = os.path.splitext(image_file["filename"] or "")[1].lower()
                 stored_name = f"{content_id}_{index}{ext}"
                 with open(os.path.join(UPLOAD_DIR, stored_name), "wb") as f:
-                    f.write(strip_image_metadata(image_file["content"], ext))
+                    f.write(processed_contents[index])
                 image_filenames.append(stored_name)
 
             original_filename = image_files[0]["filename"] or "upload"
@@ -2706,6 +2749,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
                 return
 
+            processed = strip_image_metadata(image_file["content"], ext)
+            if processed is None:
+                self.respond_json(400, {"ok": False, "error": "invalid_image_file"})
+                return
+
             # 拡張子が変わった場合に前のサムネイルが残らないよう、既存分は一旦削除する
             old_filename = video.get("og_image_filename")
             if old_filename:
@@ -2715,7 +2763,7 @@ class Handler(BaseHTTPRequestHandler):
 
             new_filename = "thumb_" + video["id"] + ext
             with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-                f.write(strip_image_metadata(image_file["content"], ext))
+                f.write(processed)
 
             video["og_image_filename"] = new_filename
             save_videos(videos)
@@ -3021,6 +3069,11 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "unsupported_file_type"})
             return
 
+        processed = strip_image_metadata(image_file["content"], ext)
+        if processed is None:
+            self.respond_json(400, {"ok": False, "error": "invalid_image_file"})
+            return
+
         # 拡張子が変わった場合に前の差し替え画像が残らないよう、既存分は一旦削除する
         config = load_config()
         old_filename = config.get("og_image_filename")
@@ -3031,7 +3084,7 @@ class Handler(BaseHTTPRequestHandler):
 
         new_filename = "og-image" + ext
         with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-            f.write(strip_image_metadata(image_file["content"], ext))
+            f.write(processed)
 
         config["og_image_filename"] = new_filename
         save_config(config)
@@ -3052,6 +3105,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- クリエイター(女の子)アカウント: 招待・登録・ログイン ----------
     def handle_serve_join_page(self, invite_token):
+        if not invite_token or not VIDEO_ID_RE.match(invite_token):
+            # 実際に発行される招待トークンはsecrets.token_urlsafe()の出力なので
+            # この文字種にしかならない。ここで弾かず後続のJSON埋め込みに通すと、
+            # 存在しないトークンとして「無効なリンクです」画面を出す経路であっても
+            # 値がそのままscript内に反映されるため、形式の時点で404にする。
+            self.send_error(404, "Not Found")
+            return
         creators = load_creators()
         creator = find_creator_by_invite_token(creators, invite_token)
         if creator:
@@ -3071,7 +3131,7 @@ class Handler(BaseHTTPRequestHandler):
         with open(os.path.join(BASE_DIR, "creator-join.html"), "r", encoding="utf-8") as f:
             page_html = f.read()
 
-        page_html = page_html.replace("{{INVITE_STATE_JSON}}", json.dumps(state))
+        page_html = page_html.replace("{{INVITE_STATE_JSON}}", json_for_script(state))
 
         body = page_html.encode("utf-8")
         self.send_response(200)

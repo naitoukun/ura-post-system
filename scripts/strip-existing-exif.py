@@ -32,6 +32,11 @@ def process_file(filename, stats):
     with open(path, "rb") as f:
         original = f.read()
     stripped = strip_image_metadata(original, ext)
+    if stripped is None:
+        # 既存ファイルが実は画像として読めない(壊れている等)場合。
+        # 遡って処理する対象がそもそも不正なだけなので、そのファイルには触れず先へ進む。
+        stats["unparsable"] += 1
+        return
     if stripped == original:
         stats["skipped"] += 1
         return
@@ -41,7 +46,7 @@ def process_file(filename, stats):
 
 
 def main():
-    stats = {"processed": 0, "skipped": 0, "missing": 0}
+    stats = {"processed": 0, "skipped": 0, "missing": 0, "unparsable": 0}
 
     with open(VIDEOS_META_PATH, "r", encoding="utf-8") as f:
         videos = json.load(f)
@@ -57,7 +62,10 @@ def main():
             config = json.load(f)
         process_file(config.get("og_image_filename"), stats)
 
-    print(f"processed={stats['processed']} skipped(no-op/gif/failed)={stats['skipped']} missing={stats['missing']}")
+    print(
+        f"processed={stats['processed']} skipped(no-op/gif)={stats['skipped']} "
+        f"unparsable={stats['unparsable']} missing={stats['missing']}"
+    )
 
 
 if __name__ == "__main__":

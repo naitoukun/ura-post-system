@@ -182,6 +182,22 @@ def get_client_ip(handler):
     return handler.client_address[0]
 
 
+def is_same_site_referer(handler):
+    """/resolve-videoのview_count等、副作用のある処理を実行してよいリクエストかを判定する。
+
+    正規の流れでは、ブラウザがindex.htmlを読み込んだ後にそのページ自身のJSが
+    fetch('/resolve-video?...')を呼ぶため、Refererは常にura-post.com自身になる。
+    他サイトに埋め込まれた<iframe>やJS(fetch(..., {mode:'no-cors'})等)からの
+    呼び出しはReferer(有れば)が別ドメインになるため、そこだけ弾いて水増しを防ぐ。
+    Refererを送らないブラウザ・プライバシー拡張機能もあるため、Referer自体が
+    無い場合は(誤検知で正規ユーザーの分まで弾かないよう)許可する側に倒す。
+    """
+    referer = handler.headers.get("Referer")
+    if not referer:
+        return True
+    return referer.startswith(PUBLIC_SITE_URL)
+
+
 def _prune_expired_login_attempts(now):
     expired_keys = [
         key for key, entry in LOGIN_ATTEMPTS.items()
@@ -1179,6 +1195,10 @@ class Handler(BaseHTTPRequestHandler):
         # 中身が異なるファイルが万一保存された場合でも、text/html等として解釈されて
         # 実行されるのを防ぐための保険(全レスポンス共通でここに一箇所だけ書けば済む)。
         self.send_header("X-Content-Type-Options", "nosniff")
+        # このサイトは他サイトの<iframe>に埋め込まれる必要が無い。埋め込みを禁止することで、
+        # iframe経由でページを読み込ませてJSを実行させ、閲覧数等を人為的に動かす手口を防ぐ
+        # (/resolve-videoのReferer判定と合わせた二重の対策)。
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
         super().end_headers()
 
     # ---------- 認証(セッションCookie) ----------
@@ -1455,6 +1475,12 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(200, {"linkRequired": True})
             return
 
+        # 他サイトへの埋め込み(iframeや、fetch(..., {mode:'no-cors'})等)からの呼び出しで
+        # 24時間カウントダウンの起点や閲覧数だけを人為的に動かされないよう、実際にこのサイト
+        # 自身のページから呼ばれたリクエストかどうかで、副作用のある処理を行うか判定する
+        # (レスポンス自体はどちらでも同じものを返す。ブロックするのは副作用のみ)。
+        trusted_request = is_same_site_referer(self)
+
         with VIDEOS_LOCK:
             videos_list = load_videos()
             video = next((v for v in videos_list if v["id"] == requested_id), None)
@@ -1464,22 +1490,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(200, {"expired": True})
                 return
 
-            # 「URLが初めて開かれた瞬間」をこの時点で記録する
-            mark_first_access(video, videos_list)
+            if trusted_request:
+                # 「URLが初めて開かれた瞬間」をこの時点で記録する
+                mark_first_access(video, videos_list)
 
             if get_time_limit_status(video)["expired"]:
                 self.respond_json(200, {"expired": True})
                 return
 
-            # モザイク越しのロック画面が表示された回数を2種類カウントする
-            # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)。
-            # - raw_view_count(総アクセス数): 読み込むたびに無条件で加算する生の回数
-            # - view_count(有効視聴回数): 同一IP+同一コンテンツは直近24時間で1回しかカウントしない
-            #   水増し対策版。ポイント付与判定はこちらを使う。
-            video["raw_view_count"] = video.get("raw_view_count", 0) + 1
-            if should_count_view(requested_id, get_client_ip(self)):
-                video["view_count"] = video.get("view_count", 0) + 1
-            save_videos(videos_list)
+            if trusted_request:
+                # モザイク越しのロック画面が表示された回数を2種類カウントする
+                # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)。
+                # - raw_view_count(総アクセス数): 読み込むたびに無条件で加算する生の回数
+                # - view_count(有効視聴回数): 同一IP+同一コンテンツは直近24時間で1回しかカウントしない
+                #   水増し対策版。ポイント付与判定はこちらを使う。
+                video["raw_view_count"] = video.get("raw_view_count", 0) + 1
+                if should_count_view(requested_id, get_client_ip(self)):
+                    video["view_count"] = video.get("view_count", 0) + 1
+                save_videos(videos_list)
 
         config = load_config()
         effective_ads = video.get("ads") or config["ads"]

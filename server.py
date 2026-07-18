@@ -1370,6 +1370,7 @@ class Handler(BaseHTTPRequestHandler):
                     "creatorName": v.get("creator_name"),
                     "creatorUrl": v.get("creator_url"),
                     "viewCount": v.get("view_count", 0),
+                    "rawViewCount": v.get("raw_view_count", 0),
                     "hasCustomThumbnail": bool(v.get("og_image_filename")),
                     "statsToken": get_stats_token(v, videos),
                     "contentType": v.get("content_type", "video"),
@@ -1413,13 +1414,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(200, {"expired": True})
                 return
 
-            # モザイク越しのロック画面が表示された回数を視聴回数としてカウントする
+            # モザイク越しのロック画面が表示された回数を2種類カウントする
             # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)。
-            # 同一IPからの短時間の連続アクセス(ページ再読み込み等)による水増しを防ぐため、
-            # 同一IP+同一コンテンツは直近24時間で1回しかカウントしない。
+            # - raw_view_count(総アクセス数): 読み込むたびに無条件で加算する生の回数
+            # - view_count(有効視聴回数): 同一IP+同一コンテンツは直近24時間で1回しかカウントしない
+            #   水増し対策版。ポイント付与判定はこちらを使う。
+            video["raw_view_count"] = video.get("raw_view_count", 0) + 1
             if should_count_view(requested_id, get_client_ip(self)):
                 video["view_count"] = video.get("view_count", 0) + 1
-                save_videos(videos_list)
+            save_videos(videos_list)
 
         config = load_config()
         effective_ads = video.get("ads") or config["ads"]
@@ -1620,6 +1623,7 @@ class Handler(BaseHTTPRequestHandler):
 
         page_html = page_html.replace("{{HEADING}}", heading)
         page_html = page_html.replace("{{VIEW_COUNT}}", str(video.get("view_count", 0)))
+        page_html = page_html.replace("{{RAW_VIEW_COUNT}}", str(video.get("raw_view_count", 0)))
         page_html = page_html.replace("{{UPLOADED_AT}}", html.escape(video["uploaded_at"]))
         page_html = page_html.replace("{{STATUS_TEXT}}", status_text)
 
@@ -3199,6 +3203,7 @@ class Handler(BaseHTTPRequestHandler):
                 "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
                 "timeLimit": get_time_limit_status(v),
                 "viewCount": v.get("view_count", 0),
+                "rawViewCount": v.get("raw_view_count", 0),
                 "pointsStatus": get_points_status(v, creator, config),
                 "ctaButtonText": v.get("cta_button_text"),
                 "ctaLinkUrl": v.get("cta_link_url"),

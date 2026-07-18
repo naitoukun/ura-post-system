@@ -136,7 +136,7 @@
 
   <div>
     <h2 class="text-lg font-bold text-slate-800">ポイント設定</h2>
-    <p class="text-xs text-slate-400 mt-1">動画・画像それぞれのアップロード1件あたりの付与ポイント（既定値）と、24時間以内に必要な最低閲覧数です。</p>
+    <p class="text-xs text-slate-400 mt-1">動画・画像それぞれのアップロード1件あたりの付与ポイント（既定値）と、24時間以内に必要な最低閲覧数です。ここでの閲覧数は「有効視聴回数」（同一IPの重複を除いた回数）を指し、単純なページ読み込み回数である「総アクセス数」とは別の集計です。</p>
   </div>
 
   <div id="pointsStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
@@ -1744,7 +1744,8 @@
     if (video.contentType === 'image') {
       addBadge('画像ギャラリー（' + (video.imageCount || 0) + '枚）', 'bg-violet-50 text-violet-700');
     }
-    addBadge('視聴回数: ' + (video.viewCount || 0), 'bg-slate-100 text-slate-500');
+    addBadge('有効視聴回数: ' + (video.viewCount || 0), 'bg-slate-100 text-slate-500');
+    addBadge('総アクセス数: ' + (video.rawViewCount || 0), 'bg-slate-100 text-slate-500');
     if (video.timeLimit && video.timeLimit.enabled) {
       addBadge(
         video.timeLimit.expired ? '24時間限定: 期限切れ' : '24時間限定: 有効',

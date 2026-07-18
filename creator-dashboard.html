@@ -576,7 +576,8 @@
     if (item.unlisted) {
       addBadge('限定公開（一覧非表示）', 'bg-amber-50 text-amber-700');
     }
-    addBadge('視聴回数: ' + (item.viewCount || 0), 'bg-slate-100 text-slate-500');
+    addBadge('有効視聴回数: ' + (item.viewCount || 0), 'bg-slate-100 text-slate-500');
+    addBadge('総アクセス数: ' + (item.rawViewCount || 0), 'bg-slate-100 text-slate-500');
 
     const psLabel = pointsStatusLabel(item.pointsStatus);
     if (psLabel) addBadge(psLabel.text, psLabel.tone);

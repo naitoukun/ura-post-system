@@ -94,6 +94,7 @@ import datetime
 import hmac
 import hashlib
 import html
+import io
 import json
 import mimetypes
 import os
@@ -105,8 +106,11 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
-# 生年月日のような「承認後も保持し続ける個人情報」の暗号化にのみ使う。他は引き続き
-# 標準ライブラリのみで完結させている(このプロジェクト唯一の外部依存)。
+from PIL import Image, ImageOps
+
+# 生年月日のような「承認後も保持し続ける個人情報」の暗号化と、アップロード画像の
+# Exif除去(下記strip_image_metadata参照)にのみ外部ライブラリを使う。他は引き続き
+# 標準ライブラリのみで完結させている。
 from cryptography.fernet import Fernet, InvalidToken
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -262,6 +266,36 @@ MAX_IMAGES_PER_GALLERY = 30
 DEFAULT_OG_IMAGE_PATH = os.path.join(BASE_DIR, "og-image.png")
 OG_IMAGE_ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_OG_IMAGE_BYTES = 5 * 1024 * 1024  # 5MB
+
+
+def strip_image_metadata(content, ext):
+    """スマホ撮影時に埋め込まれるExif情報(GPS位置情報・撮影日時・機種名等)を除去する。
+
+    向き(Orientationタグ)だけは画素に焼き込んでから捨てる(単純に除去すると
+    横向き撮影の画像が縦のまま表示されてしまうため)。GIFはアニメーションの
+    コマが壊れる恐れがあり、かつそもそもExifを持つ形式ではないため対象外とする。
+    パースに失敗した場合はアップロード自体を失敗させないよう、元のバイト列を返す。
+    """
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        return content
+    try:
+        img = Image.open(io.BytesIO(content))
+        if getattr(img, "is_animated", False):
+            return content
+        img = ImageOps.exif_transpose(img)
+        output = io.BytesIO()
+        if ext in (".jpg", ".jpeg"):
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(output, format="JPEG", quality=92)
+        elif ext == ".png":
+            img.save(output, format="PNG")
+        else:
+            img.save(output, format="WEBP", quality=92)
+        return output.getvalue()
+    except Exception:
+        print("WARNING: strip_image_metadata failed, keeping original bytes:", ext)
+        return content
 
 # クリエイターの年齢確認用の身分証提出。18歳未満のコンテンツを扱わないための本人確認であり、
 # 承認(id_verification_status == "approved")されるまでセルフアップロードはできない。
@@ -1440,7 +1474,6 @@ class Handler(BaseHTTPRequestHandler):
             "id": video["id"],
             "contentType": content_type,
             "imageCount": len(video.get("image_filenames") or []) if content_type == "image" else None,
-            "originalFilename": video["original_filename"],
             "uploadedAt": video["uploaded_at"],
             "ads": [serialize_ad(ad) for ad in effective_ads],
             "timeLimit": get_time_limit_status(video),
@@ -2306,7 +2339,7 @@ class Handler(BaseHTTPRequestHandler):
 
             new_filename = "thumb_" + video["id"] + ext
             with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-                f.write(image_file["content"])
+                f.write(strip_image_metadata(image_file["content"], ext))
 
             video["og_image_filename"] = new_filename
             save_videos(videos)
@@ -2429,7 +2462,7 @@ class Handler(BaseHTTPRequestHandler):
                 ext = os.path.splitext(image_file["filename"] or "")[1].lower()
                 stored_name = f"{content_id}_{index}{ext}"
                 with open(os.path.join(UPLOAD_DIR, stored_name), "wb") as f:
-                    f.write(image_file["content"])
+                    f.write(strip_image_metadata(image_file["content"], ext))
                 image_filenames.append(stored_name)
 
             original_filename = image_files[0]["filename"] or "upload"
@@ -2682,7 +2715,7 @@ class Handler(BaseHTTPRequestHandler):
 
             new_filename = "thumb_" + video["id"] + ext
             with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-                f.write(image_file["content"])
+                f.write(strip_image_metadata(image_file["content"], ext))
 
             video["og_image_filename"] = new_filename
             save_videos(videos)
@@ -2998,7 +3031,7 @@ class Handler(BaseHTTPRequestHandler):
 
         new_filename = "og-image" + ext
         with open(os.path.join(UPLOAD_DIR, new_filename), "wb") as f:
-            f.write(image_file["content"])
+            f.write(strip_image_metadata(image_file["content"], ext))
 
         config["og_image_filename"] = new_filename
         save_config(config)

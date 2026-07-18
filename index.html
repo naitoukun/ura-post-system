@@ -87,6 +87,14 @@
 
   .hidden-el{ display:none !important; }
 
+  /* 長押しでの画像保存対策。contextmenuイベントとは別物のiOS Safariのネイティブな
+     長押しコールアウト(「写真に保存」等)は、これが無いと止められない。 */
+  .no-save{
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
   #overlay{
     background:rgba(250,243,234,0.92);
     backdrop-filter:blur(6px);
@@ -197,7 +205,7 @@
   <div id="unlockedArea" class="hidden-el w-full flex flex-col items-center gap-4">
     <video
       id="mainVideo"
-      class="card w-full rounded-2xl"
+      class="card w-full rounded-2xl no-save"
       controls
       controlsList="nodownload noremoteplayback"
       disablePictureInPicture
@@ -272,7 +280,7 @@
 
 <!-- 画像ギャラリーの全画面表示用ライトボックス -->
 <div id="imageLightbox" class="hidden-el fixed inset-0 z-[110] bg-black/95 flex items-center justify-center p-2">
-  <img id="imageLightboxImg" src="" alt="" class="max-w-full max-h-full object-contain" draggable="false" oncontextmenu="return false;">
+  <img id="imageLightboxImg" src="" alt="" class="max-w-full max-h-full object-contain no-save" draggable="false" oncontextmenu="return false;">
 </div>
 
 <script>
@@ -570,7 +578,7 @@
           const img = document.createElement('img');
           const src = '/image/' + encodeURIComponent(info.id) + '/' + i;
           img.src = src;
-          img.className = 'card w-full rounded-2xl cursor-zoom-in';
+          img.className = 'card w-full rounded-2xl cursor-zoom-in no-save';
           img.loading = 'lazy';
           img.draggable = false;
           img.oncontextmenu = () => false;

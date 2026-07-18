@@ -310,11 +310,19 @@
   function openImageLightbox(src) {
     imageLightboxImg.src = src;
     imageLightbox.classList.remove('hidden-el');
+    // 背景ページがスクロールされてしまわないよう固定する(閉じたら元に戻す)
+    document.body.style.overflow = 'hidden';
   }
   imageLightbox.addEventListener('click', () => {
     imageLightbox.classList.add('hidden-el');
     imageLightboxImg.src = '';
+    document.body.style.overflow = '';
   });
+  // iOSのSafariはbody側にoverflow:hiddenを付けただけだと背景のバウンススクロールを
+  // 防ぎきれないことがあるため、オーバーレイ表示中はtouchmove自体を止める。
+  imageLightbox.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+  }, { passive: false });
 
   ageGateYes.addEventListener('click', () => {
     localStorage.setItem('ageVerified', '1');

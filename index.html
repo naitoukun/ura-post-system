@@ -82,6 +82,17 @@
     box-shadow:none;
   }
 
+  /* 「この子が気になる」「投稿一覧を見る」用。プレミアムCTA(コーラル)ほど強くは
+     主張しないが、以前のグレー地味ボタンより目立たせたいので、ブランドのティール系で塗る。 */
+  .btn-secondary-cta{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 4px 14px rgba(74,157,144,0.3);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn-secondary-cta:active{ transform:scale(0.98); }
+  .btn-secondary-cta:hover{ box-shadow:0 6px 18px rgba(74,157,144,0.4); }
+
   @keyframes breathe{
     0%,100%{ opacity:.55; transform:scale(1); }
     50%{ opacity:1; transform:scale(1.06); }
@@ -229,32 +240,24 @@
       ♥ 【ファン限定】Fantia特設ページへ ♥
     </a>
 
-    <button
-      id="shareBtn"
-      type="button"
-      class="w-full border border-gray-200 text-gray-500 rounded-xl py-3 text-sm font-medium hover:bg-gray-50"
-    >
-      このページをシェアする
-    </button>
-
     <!-- 投稿者の連絡先URL(SNS等)が設定されている場合のみ表示するボタン -->
     <a
       id="interestedBtn"
       href="#"
       target="_blank"
       rel="noopener noreferrer"
-      class="hidden-el w-full text-center border border-gray-200 text-gray-500 rounded-xl py-3 text-sm font-medium hover:bg-gray-50 block"
+      class="hidden-el btn-secondary-cta w-full text-center py-3.5 rounded-xl text-sm font-bold block"
     >
-      この子が気になる
+      👀 この子が気になる 👀
     </a>
 
     <!-- 同じ投稿者の投稿一覧ページへのボタン(他の投稿者への回遊は含めない) -->
     <button
       id="postListBtn"
       type="button"
-      class="hidden-el w-full border border-gray-200 text-gray-500 rounded-xl py-3 text-sm font-medium hover:bg-gray-50"
+      class="hidden-el btn-secondary-cta w-full py-3.5 rounded-xl text-sm font-bold"
     >
-      この投稿者の投稿一覧を見る
+      🗂️ この投稿者の投稿一覧を見る 🗂️
     </button>
 
     <!-- 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンIDが異なるため、
@@ -308,7 +311,6 @@
   const mainVideo   = document.getElementById('mainVideo');
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
-  const shareBtn = document.getElementById('shareBtn');
   const interestedBtn = document.getElementById('interestedBtn');
   const postListBtn = document.getElementById('postListBtn');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
@@ -353,28 +355,6 @@
   });
   ageGateNo.addEventListener('click', () => {
     location.href = 'https://www.google.com/';
-  });
-
-  shareBtn.addEventListener('click', () => {
-    const shareUrl = location.href;
-    const shareData = { title: 'うらぽす', text: 'うらぽすでこんな投稿を見つけました', url: shareUrl };
-
-    if (navigator.share) {
-      navigator.share(shareData).catch(() => {});
-      return;
-    }
-
-    const originalText = shareBtn.textContent;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        shareBtn.textContent = 'リンクをコピーしました';
-        setTimeout(() => { shareBtn.textContent = originalText; }, 1800);
-      }).catch(() => {
-        window.prompt('このURLをコピーしてシェアしてください', shareUrl);
-      });
-    } else {
-      window.prompt('このURLをコピーしてシェアしてください', shareUrl);
-    }
   });
 
   // 広告コードが未設定、またはVASTタグがエラー/フィル無しだった場合のフォールバック待機時間

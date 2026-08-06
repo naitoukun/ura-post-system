@@ -1533,6 +1533,7 @@ class Handler(BaseHTTPRequestHandler):
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
             "ownerCreatorId": owner_creator_id,
+            "contactUrl": owner_creator.get("contact_url") if owner_creator else None,
         })
 
     def handle_serve_video(self, video_id):

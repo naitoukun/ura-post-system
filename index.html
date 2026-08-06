@@ -237,6 +237,17 @@
       このページをシェアする
     </button>
 
+    <!-- 投稿者の連絡先URL(SNS等)が設定されている場合のみ表示するボタン -->
+    <a
+      id="interestedBtn"
+      href="#"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="hidden-el w-full text-center border border-gray-200 text-gray-500 rounded-xl py-3 text-sm font-medium hover:bg-gray-50 block"
+    >
+      この子が気になる
+    </a>
+
     <!-- 同じ投稿者の投稿一覧ページへのボタン(他の投稿者への回遊は含めない) -->
     <button
       id="postListBtn"
@@ -298,6 +309,7 @@
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
   const shareBtn = document.getElementById('shareBtn');
+  const interestedBtn = document.getElementById('interestedBtn');
   const postListBtn = document.getElementById('postListBtn');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
   // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
@@ -416,6 +428,12 @@
 
     if (info.timeLimit && info.timeLimit.enabled && info.timeLimit.expiresAtEpoch) {
       startCountdown(info.timeLimit.expiresAtEpoch);
+    }
+
+    // 投稿者の連絡先URL(SNS等)が設定されている場合のみ表示するボタン
+    if (info.contactUrl) {
+      interestedBtn.href = info.contactUrl;
+      interestedBtn.classList.remove('hidden-el');
     }
 
     // 同じ投稿者の投稿一覧ページへのボタン(他の投稿者への導線は含めない)
@@ -634,6 +652,7 @@
           contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
           contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
           ownerCreatorId: status.ownerCreatorId,
+          contactUrl: status.contactUrl,
         };
       })
       .catch(() => ({ linkRequired: true }));

@@ -36,6 +36,7 @@
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
+- POST /api/set-fallback-ad  動画広告がフィルしなかった時の代替全画面広告(ExoClick AdProvider)ゾーンIDの更新・解除（JSON）※要ログイン
 - POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数・ボーナス閲覧数閾値とボーナス付与量）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
@@ -406,6 +407,13 @@ DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE = "5968878"
 DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP = "5968882"
 MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH = 100
 
+# 動画広告(VASTタグ)がフィルしなかった/エラーだった時に、無広告のままアンロックせず
+# 代わりに表示する全画面広告(ExoClick AdProvider形式)。動画広告よりバナー系の方がフィル率が
+# 高い実測があるため、ここで拾って「必ず何らかの広告を見せる」割合を上げる狙い。
+# 空欄にすると、この保険無し(=フィルしなければ即アンロック)の従来動作に戻る。
+DEFAULT_FALLBACK_AD_ZONE_ID = "5996162"
+MAX_FALLBACK_AD_ZONE_ID_LENGTH = 100
+
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -649,6 +657,7 @@ def load_config():
             "bonus_points_image": DEFAULT_BONUS_POINTS_IMAGE,
             "content_page_ad_zone_id_mobile": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE,
             "content_page_ad_zone_id_desktop": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP,
+            "fallback_ad_zone_id": DEFAULT_FALLBACK_AD_ZONE_ID,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -667,6 +676,7 @@ def load_config():
     legacy_zone_id = config.pop("content_page_ad_zone_id", None)
     config.setdefault("content_page_ad_zone_id_mobile", legacy_zone_id or DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE)
     config.setdefault("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP)
+    config.setdefault("fallback_ad_zone_id", DEFAULT_FALLBACK_AD_ZONE_ID)
     return config
 
 
@@ -958,6 +968,20 @@ def validate_content_page_ad_zone_id(zone_id):
         return None, None
     if len(zone_id) > MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH:
         return None, "invalid_content_page_ad_zone_id"
+    return zone_id, None
+
+
+def validate_fallback_ad_zone_id(zone_id):
+    """動画広告がフィルしなかった時の代替全画面広告(ExoClick AdProvider)ゾーンIDのバリデーション。
+
+    空文字/Noneは「保険広告なし(従来通り即アンロック)」として許可する。
+    成功時は (zone_id_or_None, None) を、失敗時は (None, error_code) を返す。
+    """
+    zone_id = (zone_id or "").strip()
+    if not zone_id:
+        return None, None
+    if len(zone_id) > MAX_FALLBACK_AD_ZONE_ID_LENGTH:
+        return None, "invalid_fallback_ad_zone_id"
     return zone_id, None
 
 
@@ -1424,6 +1448,7 @@ class Handler(BaseHTTPRequestHandler):
             "bonusPointsImage": config.get("bonus_points_image", DEFAULT_BONUS_POINTS_IMAGE),
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
+            "fallbackAdZoneId": config.get("fallback_ad_zone_id", DEFAULT_FALLBACK_AD_ZONE_ID),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1532,6 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
             "premiumButtonText": cta["premiumButtonText"],
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
+            "fallbackAdZoneId": config.get("fallback_ad_zone_id", DEFAULT_FALLBACK_AD_ZONE_ID),
             "ownerCreatorId": owner_creator_id,
             "contactUrl": owner_creator.get("contact_url") if owner_creator else None,
         })
@@ -1887,6 +1913,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_content_page_ad()
+        elif path == "/api/set-fallback-ad":
+            if self.require_auth():
+                return
+            self.handle_set_fallback_ad()
         elif path == "/api/set-ads":
             if self.require_auth():
                 return
@@ -2119,6 +2149,29 @@ class Handler(BaseHTTPRequestHandler):
         save_config(config)
 
         self.respond_json(200, {"ok": True, "zoneIdMobile": zone_id_mobile, "zoneIdDesktop": zone_id_desktop})
+
+    def handle_set_fallback_ad(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        zone_id, error = validate_fallback_ad_zone_id(data.get("zoneId"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        config = load_config()
+        config["fallback_ad_zone_id"] = zone_id
+        save_config(config)
+
+        self.respond_json(200, {"ok": True, "zoneId": zone_id})
 
     def handle_set_ads(self):
         content_length = int(self.headers.get("Content-Length", 0))

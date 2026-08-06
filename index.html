@@ -366,6 +366,9 @@
   // 通常の広告読み込み+再生時間よりは十分長く、かつ視聴者を無限に待たせないための値。
   // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
   const MAX_AD_WAIT_MS = 25000;
+  // 動画広告(VASTタグ)がフィル無し/エラーだった場合に代わりに表示する保険の全画面広告
+  // (ExoClick AdProvider形式)を、最低これだけの時間は表示してからアンロックする。
+  const FALLBACK_AD_DISPLAY_MS = 8000;
   // 管理画面(/admin)からリンクが設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_LINK = 'https://fantia.jp/';
   // 管理画面(/admin)からボタンの文字が設定されていない場合のフォールバック
@@ -463,6 +466,8 @@
   // CONTENT_RESUME_REQUESTED / ALL_ADS_COMPLETED / エラー等、複数の経路から
   // 二重にonAdFinished()が呼ばれないようにするフラグ
   let adFinishedCalled = false;
+  // 保険の全画面広告(startFallbackAd)が複数の経路から二重に始まらないようにするフラグ
+  let fallbackAdStarted = false;
 
   function setUpIma() {
     if (adsLoader || typeof google === 'undefined' || !google.ima) return;
@@ -497,13 +502,44 @@
 
   function onAdError() {
     if (adsManager) adsManager.destroy();
-    // VASTタグがエラー/フィル無しだった場合は、視聴者を待たせすぎずそのままアンロックする
-    setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
+    // VASTタグがエラー/フィル無しだった場合、視聴者を待たせすぎない範囲で
+    // 代わりの全画面広告(保険)を試す。保険広告も未設定ならそのままアンロックする。
+    setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
+  }
+
+  // 動画広告(VASTタグ)が出せなかった時の保険。管理画面で設定したExoClick AdProviderの
+  // 全画面広告ゾーンを代わりに表示し、一定時間後にアンロックする。ゾーン未設定の場合は
+  // この保険無し(=従来通りそのままアンロック)にフォールバックする。
+  function startFallbackAd() {
+    if (adFinishedCalled || fallbackAdStarted) return;
+    fallbackAdStarted = true;
+
+    videoInfoPromise.then((info) => {
+      const zoneId = info.fallbackAdZoneId;
+      if (!zoneId) {
+        onAdFinished();
+        return;
+      }
+      adLoadingState.classList.add('hidden-el');
+      adContainerEl.innerHTML = '';
+      const ins = document.createElement('ins');
+      ins.className = 'eas6a97888e33';
+      ins.setAttribute('data-zoneid', zoneId);
+      ins.style.display = 'block';
+      ins.style.width = '100%';
+      ins.style.height = '100%';
+      adContainerEl.appendChild(ins);
+      (window.AdProvider = window.AdProvider || []).push({ serve: {} });
+      setTimeout(onAdFinished, FALLBACK_AD_DISPLAY_MS);
+    }).catch(() => {
+      onAdFinished();
+    });
   }
 
   function startAdSimulation() {
     unlockBtn.disabled = true;
     adFinishedCalled = false;
+    fallbackAdStarted = false;
     overlay.classList.remove('hidden-el');
     selectedAdDebug.textContent = '';
 
@@ -515,14 +551,14 @@
     adLoadingState.classList.remove('hidden-el');
 
     if (!selectedAd.adCode || typeof google === 'undefined' || !google.ima) {
-      // 広告コード未設定、またはSDKが読み込めていない場合はそのままアンロックする
-      setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
+      // 広告コード未設定、またはSDKが読み込めていない場合は保険の全画面広告を試す
+      setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
       return;
     }
 
     setUpIma();
     if (!adsLoader) {
-      setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
+      setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
       return;
     }
 
@@ -539,8 +575,8 @@
 
     adsLoader.requestAds(adsRequest);
     // 広告ネットワークからの応答自体が来ずADS_MANAGER_LOADED/AD_ERRORのどちらも
-    // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限。
-    setTimeout(onAdFinished, MAX_AD_WAIT_MS);
+    // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限(保険広告を試す)。
+    setTimeout(startFallbackAd, MAX_AD_WAIT_MS);
   }
 
   function onAdFinished() {
@@ -631,6 +667,7 @@
           premiumButtonText: status.premiumButtonText,
           contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
           contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
+          fallbackAdZoneId: status.fallbackAdZoneId,
           ownerCreatorId: status.ownerCreatorId,
           contactUrl: status.contactUrl,
         };

@@ -282,7 +282,6 @@
 <div id="overlay" class="hidden-el fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 px-4 sm:px-6">
   <div id="adPlayerWrap" class="relative w-full max-w-md aspect-video bg-black rounded-xl overflow-hidden">
     <video id="adContentEl" class="absolute inset-0 w-full h-full" muted playsinline></video>
-    <div id="adContainerEl" class="absolute inset-0"></div>
 
     <div id="adLoadingState" class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/60">
       <svg class="spin w-8 h-8 text-white" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -291,12 +290,11 @@
       <p class="text-sm font-bold text-white text-center px-4">読み込み中…</p>
     </div>
 
-    <!-- 保険の全画面広告(startFallbackAd)を試している間だけ表示する控えめな案内。
-         広告が実際にフィルしたかどうかを検知する手段が無いため、フィルしなかった場合に
-         ただ真っ黒に見えないようにする保険。広告が表示された場合は上に重なって隠れてもよい。 -->
-    <div id="fallbackAdHint" class="hidden-el absolute bottom-0 inset-x-0 bg-black/60 py-2 px-4">
-      <p class="text-xs font-bold text-white text-center">読み込み中…</p>
-    </div>
+    <!-- adLoadingStateより後ろに置き、動画広告/保険の全画面広告のどちらが実際に
+         レンダリングされても「読み込み中…」表示の上に重なって見えるようにする。
+         (動画広告はLOADEDイベントで明示的にadLoadingStateを隠すが、保険広告側は
+         フィルしたかどうかを検知できないため、重なり順で自然に見えるようにしておく) -->
+    <div id="adContainerEl" class="absolute inset-0"></div>
   </div>
 
   <p id="selectedAdDebug" class="text-slate-300 text-[11px]"></p>
@@ -333,7 +331,6 @@
   const adContentEl   = document.getElementById('adContentEl');
   const adContainerEl = document.getElementById('adContainerEl');
   const adLoadingState= document.getElementById('adLoadingState');
-  const fallbackAdHint = document.getElementById('fallbackAdHint');
   const ageGateOverlay= document.getElementById('ageGateOverlay');
   const ageGateYes    = document.getElementById('ageGateYes');
   const ageGateNo     = document.getElementById('ageGateNo');
@@ -534,7 +531,10 @@
         onAdFinished();
         return;
       }
-      adLoadingState.classList.add('hidden-el');
+      // 動画広告の「読み込み中…」表示は隠さずそのまま引き継ぐ(一度隠してから
+      // 同じ文言を出し直すと、途切れて2回読み込みが入ったように見えるため)。
+      // フィルしたかどうかを検知する手段が無いので、フィルしなかった場合はこのまま
+      // 「読み込み中…」が表示され続け、フィルした場合は広告がこの上に重なる。
       adContainerEl.innerHTML = '';
       const ins = document.createElement('ins');
       ins.className = zoneClass;
@@ -543,9 +543,6 @@
       ins.style.width = '100%';
       ins.style.height = '100%';
       adContainerEl.appendChild(ins);
-      // フィルしたかどうかを検知する手段が無いため、フィルしなかった場合に備えて
-      // 控えめな案内を出しておく(フィルした場合は広告の上に重なって隠れるだけでよい)。
-      fallbackAdHint.classList.remove('hidden-el');
       (window.AdProvider = window.AdProvider || []).push({ serve: {} });
       setTimeout(onAdFinished, FALLBACK_AD_DISPLAY_MS);
     }).catch(() => {
@@ -558,7 +555,6 @@
     adFinishedCalled = false;
     fallbackAdStarted = false;
     overlay.classList.remove('hidden-el');
-    fallbackAdHint.classList.add('hidden-el');
     selectedAdDebug.textContent = '';
 
     // 画像ギャラリーも動画と同じ広告(VASTタグ)を、同じIMA SDKの仕組みで再生する

@@ -371,8 +371,8 @@
   // 通常の広告読み込み+再生時間よりは十分長く、かつ視聴者を無限に待たせないための値。
   // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
   const MAX_AD_WAIT_MS = 25000;
-  // 動画広告(VASTタグ)がフィル無し/エラーだった場合に代わりに表示する保険の全画面広告
-  // (ExoClick AdProvider形式)を、最低これだけの時間は表示してからアンロックする。
+  // 全画面広告(ExoClick AdProvider形式。PCでは最初から、スマホでは動画広告が
+  // フィルしなかった時の保険として使う)を、最低これだけの時間は表示してからアンロックする。
   // フィルしたかどうかを検知する手段が無く、フィルしなかった場合はこの時間ずっと
   // 何も表示されない(真っ暗)ままになるため、視聴者を待たせすぎない短めの値にしている。
   const FALLBACK_AD_DISPLAY_MS = 4000;
@@ -514,9 +514,10 @@
     setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
   }
 
-  // 動画広告(VASTタグ)が出せなかった時の保険。管理画面で設定したExoClick AdProviderの
-  // 全画面広告ゾーンを代わりに表示し、一定時間後にアンロックする。ゾーン未設定の場合は
-  // この保険無し(=従来通りそのままアンロック)にフォールバックする。
+  // 全画面広告(ExoClick AdProvider)を表示し、一定時間後にアンロックする。
+  // PCではこれが最初から使われる広告そのもの、スマホでは動画広告(VASTタグ)が
+  // 出せなかった時の保険として使われる。管理画面で設定したゾーンが無い場合は
+  // このまま(保険無し=従来通りそのままアンロック)にフォールバックする。
   function startFallbackAd() {
     if (adFinishedCalled || fallbackAdStarted) return;
     fallbackAdStarted = true;
@@ -563,6 +564,14 @@
 
     adPlayerWrap.classList.remove('hidden-el');
     adLoadingState.classList.remove('hidden-el');
+
+    // PCは動画広告(VASTタグ)がほぼフィルしない実測があるため、動画広告は試さず
+    // 最初から全画面広告(ExoClick AdProvider)を使う。スマホは引き続き動画広告を使う
+    // (スマホの動画広告がフィルしなかった場合の保険としても同じ全画面広告を使う)。
+    if (window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches) {
+      startFallbackAd();
+      return;
+    }
 
     if (!selectedAd.adCode || typeof google === 'undefined' || !google.ima) {
       // 広告コード未設定、またはSDKが読み込めていない場合は保険の全画面広告を試す

@@ -361,8 +361,14 @@
 
   <form id="fallbackAdForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">広告ゾーンID（空欄で保険無し）</span>
-      <input type="text" name="zoneId" maxlength="100" placeholder="例: 5996162"
+      <span class="text-sm font-medium text-slate-700">PC用の広告ゾーンID（空欄で保険無し）</span>
+      <input type="text" name="zoneIdDesktop" maxlength="100" placeholder="例: 5996164"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">スマホ用の広告ゾーンID（空欄で保険無し）</span>
+      <input type="text" name="zoneIdMobile" maxlength="100" placeholder="例: 5996162"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
 
@@ -1643,8 +1649,12 @@
     fetch('/site-config', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        fallbackAdStatusBox.textContent = data.fallbackAdZoneId ? `ゾーンID: ${data.fallbackAdZoneId}` : '保険無し（未設定）';
-        fallbackAdForm.elements.zoneId.value = data.fallbackAdZoneId || '';
+        const parts = [];
+        parts.push(data.fallbackAdZoneIdDesktop ? `PC: ${data.fallbackAdZoneIdDesktop}` : 'PC: 保険無し');
+        parts.push(data.fallbackAdZoneIdMobile ? `スマホ: ${data.fallbackAdZoneIdMobile}` : 'スマホ: 保険無し');
+        fallbackAdStatusBox.textContent = parts.join(' / ');
+        fallbackAdForm.elements.zoneIdDesktop.value = data.fallbackAdZoneIdDesktop || '';
+        fallbackAdForm.elements.zoneIdMobile.value = data.fallbackAdZoneIdMobile || '';
       })
       .catch(() => {
         fallbackAdStatusBox.textContent = '状態の取得に失敗しました。';
@@ -1663,7 +1673,8 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        zoneId: formData.get('zoneId'),
+        zoneIdDesktop: formData.get('zoneIdDesktop'),
+        zoneIdMobile: formData.get('zoneIdMobile'),
       }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))

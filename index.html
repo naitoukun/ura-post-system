@@ -515,7 +515,11 @@
     fallbackAdStarted = true;
 
     videoInfoPromise.then((info) => {
-      const zoneId = info.fallbackAdZoneId;
+      // 視聴ページのバナー広告と同じ判定で、PC/スマホ別々のゾーン(=別々のExoClick広告ユニット、
+      // クラス名も異なる)を出し分ける。動画広告は特にPC側でフィルしづらい実測があるため。
+      const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
+      const zoneId = isDesktopAd ? info.fallbackAdZoneIdDesktop : info.fallbackAdZoneIdMobile;
+      const zoneClass = isDesktopAd ? 'eas6a97888e35' : 'eas6a97888e33';
       if (!zoneId) {
         onAdFinished();
         return;
@@ -523,7 +527,7 @@
       adLoadingState.classList.add('hidden-el');
       adContainerEl.innerHTML = '';
       const ins = document.createElement('ins');
-      ins.className = 'eas6a97888e33';
+      ins.className = zoneClass;
       ins.setAttribute('data-zoneid', zoneId);
       ins.style.display = 'block';
       ins.style.width = '100%';
@@ -667,7 +671,8 @@
           premiumButtonText: status.premiumButtonText,
           contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
           contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
-          fallbackAdZoneId: status.fallbackAdZoneId,
+          fallbackAdZoneIdMobile: status.fallbackAdZoneIdMobile,
+          fallbackAdZoneIdDesktop: status.fallbackAdZoneIdDesktop,
           ownerCreatorId: status.ownerCreatorId,
           contactUrl: status.contactUrl,
         };

@@ -36,7 +36,7 @@
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
-- POST /api/set-fallback-ad  動画広告がフィルしなかった時の代替全画面広告(ExoClick AdProvider)ゾーンIDの更新・解除（JSON）※要ログイン
+- POST /api/set-fallback-ad  動画広告がフィルしなかった時の代替全画面広告(ExoClick AdProvider)ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
 - POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数・ボーナス閲覧数閾値とボーナス付与量）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
@@ -410,8 +410,11 @@ MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH = 100
 # 動画広告(VASTタグ)がフィルしなかった/エラーだった時に、無広告のままアンロックせず
 # 代わりに表示する全画面広告(ExoClick AdProvider形式)。動画広告よりバナー系の方がフィル率が
 # 高い実測があるため、ここで拾って「必ず何らかの広告を見せる」割合を上げる狙い。
-# 空欄にすると、この保険無し(=フィルしなければ即アンロック)の従来動作に戻る。
-DEFAULT_FALLBACK_AD_ZONE_ID = "5996162"
+# PC/スマホでフィル率の傾向が異なる(PC側で動画広告が特に出づらい)ため、上記の視聴ページ
+# バナー広告と同様にPC/スマホで別々のゾーンID(=別々のExoClick広告ユニット)を持つ。
+# 空欄にすると、その端末では保険無し(=フィルしなければ即アンロック)の従来動作に戻る。
+DEFAULT_FALLBACK_AD_ZONE_ID_MOBILE = "5996162"
+DEFAULT_FALLBACK_AD_ZONE_ID_DESKTOP = "5996164"
 MAX_FALLBACK_AD_ZONE_ID_LENGTH = 100
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -657,7 +660,8 @@ def load_config():
             "bonus_points_image": DEFAULT_BONUS_POINTS_IMAGE,
             "content_page_ad_zone_id_mobile": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE,
             "content_page_ad_zone_id_desktop": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP,
-            "fallback_ad_zone_id": DEFAULT_FALLBACK_AD_ZONE_ID,
+            "fallback_ad_zone_id_mobile": DEFAULT_FALLBACK_AD_ZONE_ID_MOBILE,
+            "fallback_ad_zone_id_desktop": DEFAULT_FALLBACK_AD_ZONE_ID_DESKTOP,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -676,7 +680,10 @@ def load_config():
     legacy_zone_id = config.pop("content_page_ad_zone_id", None)
     config.setdefault("content_page_ad_zone_id_mobile", legacy_zone_id or DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE)
     config.setdefault("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP)
-    config.setdefault("fallback_ad_zone_id", DEFAULT_FALLBACK_AD_ZONE_ID)
+    # 旧: PC/スマホ分離前の単一ゾーンID設定からの移行(既存の値はモバイル用として引き継ぐ)
+    legacy_fallback_zone_id = config.pop("fallback_ad_zone_id", None)
+    config.setdefault("fallback_ad_zone_id_mobile", legacy_fallback_zone_id or DEFAULT_FALLBACK_AD_ZONE_ID_MOBILE)
+    config.setdefault("fallback_ad_zone_id_desktop", DEFAULT_FALLBACK_AD_ZONE_ID_DESKTOP)
     return config
 
 
@@ -1448,7 +1455,8 @@ class Handler(BaseHTTPRequestHandler):
             "bonusPointsImage": config.get("bonus_points_image", DEFAULT_BONUS_POINTS_IMAGE),
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
-            "fallbackAdZoneId": config.get("fallback_ad_zone_id", DEFAULT_FALLBACK_AD_ZONE_ID),
+            "fallbackAdZoneIdMobile": config.get("fallback_ad_zone_id_mobile", DEFAULT_FALLBACK_AD_ZONE_ID_MOBILE),
+            "fallbackAdZoneIdDesktop": config.get("fallback_ad_zone_id_desktop", DEFAULT_FALLBACK_AD_ZONE_ID_DESKTOP),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1557,7 +1565,8 @@ class Handler(BaseHTTPRequestHandler):
             "premiumButtonText": cta["premiumButtonText"],
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
-            "fallbackAdZoneId": config.get("fallback_ad_zone_id", DEFAULT_FALLBACK_AD_ZONE_ID),
+            "fallbackAdZoneIdMobile": config.get("fallback_ad_zone_id_mobile", DEFAULT_FALLBACK_AD_ZONE_ID_MOBILE),
+            "fallbackAdZoneIdDesktop": config.get("fallback_ad_zone_id_desktop", DEFAULT_FALLBACK_AD_ZONE_ID_DESKTOP),
             "ownerCreatorId": owner_creator_id,
             "contactUrl": owner_creator.get("contact_url") if owner_creator else None,
         })
@@ -2162,16 +2171,22 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": "invalid_json"})
             return
 
-        zone_id, error = validate_fallback_ad_zone_id(data.get("zoneId"))
+        zone_id_mobile, error = validate_fallback_ad_zone_id(data.get("zoneIdMobile"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        zone_id_desktop, error = validate_fallback_ad_zone_id(data.get("zoneIdDesktop"))
         if error:
             self.respond_json(400, {"ok": False, "error": error})
             return
 
         config = load_config()
-        config["fallback_ad_zone_id"] = zone_id
+        config["fallback_ad_zone_id_mobile"] = zone_id_mobile
+        config["fallback_ad_zone_id_desktop"] = zone_id_desktop
         save_config(config)
 
-        self.respond_json(200, {"ok": True, "zoneId": zone_id})
+        self.respond_json(200, {"ok": True, "zoneIdMobile": zone_id_mobile, "zoneIdDesktop": zone_id_desktop})
 
     def handle_set_ads(self):
         content_length = int(self.headers.get("Content-Length", 0))

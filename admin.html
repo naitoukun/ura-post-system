@@ -351,35 +351,6 @@
   </form>
 
   <div>
-    <h2 class="text-lg font-bold text-slate-800">保険の全画面広告（動画広告がフィルしなかった時用）</h2>
-    <p class="text-xs text-slate-400 mt-1">動画広告(VASTタグ)がエラー/フィル無しだった時に、無広告のままアンロックせず代わりに表示するExoClick AdProvider形式の全画面広告です。空欄にすると、この保険無し（従来通りそのままアンロック）に戻ります。</p>
-  </div>
-
-  <div id="fallbackAdStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
-    現在の状態を確認しています…
-  </div>
-
-  <form id="fallbackAdForm" class="card rounded-2xl p-4 flex flex-col gap-4">
-    <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">PC用の広告ゾーンID（空欄で保険無し）</span>
-      <input type="text" name="zoneIdDesktop" maxlength="100" placeholder="例: 5996164"
-        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-    </label>
-
-    <label class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">スマホ用の広告ゾーンID（空欄で保険無し）</span>
-      <input type="text" name="zoneIdMobile" maxlength="100" placeholder="例: 5996162"
-        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-    </label>
-
-    <button type="submit" id="fallbackAdSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
-      更新
-    </button>
-
-    <p id="fallbackAdResultMsg" class="text-sm"></p>
-  </form>
-
-  <div>
     <h2 class="text-lg font-bold text-slate-800">OGP画像設定</h2>
     <p class="text-xs text-slate-400 mt-1">動画リンクをSNS等でシェアした時に表示されるカード画像です（動画の中身とは無関係の、サイト共通のブランド画像）。png/jpg/webp、5MBまで。</p>
   </div>
@@ -441,11 +412,6 @@
   const contentPageAdForm      = document.getElementById('contentPageAdForm');
   const contentPageAdSubmitBtn = document.getElementById('contentPageAdSubmitBtn');
   const contentPageAdResultMsg = document.getElementById('contentPageAdResultMsg');
-  const fallbackAdStatusBox    = document.getElementById('fallbackAdStatusBox');
-  const fallbackAdForm         = document.getElementById('fallbackAdForm');
-  const fallbackAdSubmitBtn    = document.getElementById('fallbackAdSubmitBtn');
-  const fallbackAdResultMsg    = document.getElementById('fallbackAdResultMsg');
-
   const logoutBtn    = document.getElementById('logoutBtn');
 
   const pointsStatusBox = document.getElementById('pointsStatusBox');
@@ -488,7 +454,6 @@
   refreshLinkStatus();
   refreshAdsStatus();
   refreshContentPageAdStatus();
-  refreshFallbackAdStatus();
   refreshOgImageStatus();
   refreshPointsStatus();
   refreshCreatorList();
@@ -1642,58 +1607,6 @@
         contentPageAdSubmitBtn.disabled = false;
         contentPageAdResultMsg.textContent = '通信エラーが発生しました。';
         contentPageAdResultMsg.classList.add('text-rose-500');
-      });
-  });
-
-  function refreshFallbackAdStatus() {
-    fetch('/site-config', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        const parts = [];
-        parts.push(data.fallbackAdZoneIdDesktop ? `PC: ${data.fallbackAdZoneIdDesktop}` : 'PC: 保険無し');
-        parts.push(data.fallbackAdZoneIdMobile ? `スマホ: ${data.fallbackAdZoneIdMobile}` : 'スマホ: 保険無し');
-        fallbackAdStatusBox.textContent = parts.join(' / ');
-        fallbackAdForm.elements.zoneIdDesktop.value = data.fallbackAdZoneIdDesktop || '';
-        fallbackAdForm.elements.zoneIdMobile.value = data.fallbackAdZoneIdMobile || '';
-      })
-      .catch(() => {
-        fallbackAdStatusBox.textContent = '状態の取得に失敗しました。';
-      });
-  }
-
-  fallbackAdForm.addEventListener('submit', function (e) {
-    e.preventDefault();
-    fallbackAdResultMsg.textContent = '';
-    fallbackAdResultMsg.className = 'text-sm';
-    fallbackAdSubmitBtn.disabled = true;
-
-    const formData = new FormData(fallbackAdForm);
-
-    fetch('/api/set-fallback-ad', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        zoneIdDesktop: formData.get('zoneIdDesktop'),
-        zoneIdMobile: formData.get('zoneIdMobile'),
-      }),
-    })
-      .then((res) => res.json().then((data) => ({ status: res.status, data })))
-      .then(({ status, data }) => {
-        fallbackAdSubmitBtn.disabled = false;
-        if (redirectIfUnauthenticated(status)) return;
-        if (status === 200 && data.ok) {
-          fallbackAdResultMsg.textContent = '更新しました。';
-          fallbackAdResultMsg.classList.add('text-teal-600');
-          refreshFallbackAdStatus();
-        } else {
-          fallbackAdResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
-          fallbackAdResultMsg.classList.add('text-rose-500');
-        }
-      })
-      .catch(() => {
-        fallbackAdSubmitBtn.disabled = false;
-        fallbackAdResultMsg.textContent = '通信エラーが発生しました。';
-        fallbackAdResultMsg.classList.add('text-rose-500');
       });
   });
 

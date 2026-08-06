@@ -20,8 +20,6 @@
 <meta name="twitter:image" content="{{OG_IMAGE_URL}}">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
-<!-- 画像ギャラリーのアンロック広告用(ExoClick AdProvider)。動画側は引き続きIMA SDK/VASTを使う -->
-<script async type="application/javascript" src="https://a.pemsrv.com/ad-provider.js"></script>
 <!-- アンロック後の視聴ページ(動画・画像共通)に表示するバナー広告用(ExoClick AdProvider) -->
 <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
 <!-- アクセス解析(GoatCounter)。投稿閲覧ページのみに設置 -->
@@ -371,11 +369,6 @@
   // 通常の広告読み込み+再生時間よりは十分長く、かつ視聴者を無限に待たせないための値。
   // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
   const MAX_AD_WAIT_MS = 25000;
-  // 全画面広告(ExoClick AdProvider形式。PCでは最初から、スマホでは動画広告が
-  // フィルしなかった時の保険として使う)を、最低これだけの時間は表示してからアンロックする。
-  // フィルしたかどうかを検知する手段が無く、フィルしなかった場合はこの時間ずっと
-  // 何も表示されない(真っ暗)ままになるため、視聴者を待たせすぎない短めの値にしている。
-  const FALLBACK_AD_DISPLAY_MS = 4000;
   // 管理画面(/admin)からリンクが設定されていない場合のフォールバック
   const FALLBACK_PREMIUM_LINK = 'https://fantia.jp/';
   // 管理画面(/admin)からボタンの文字が設定されていない場合のフォールバック
@@ -473,8 +466,6 @@
   // CONTENT_RESUME_REQUESTED / ALL_ADS_COMPLETED / エラー等、複数の経路から
   // 二重にonAdFinished()が呼ばれないようにするフラグ
   let adFinishedCalled = false;
-  // 保険の全画面広告(startFallbackAd)が複数の経路から二重に始まらないようにするフラグ
-  let fallbackAdStarted = false;
 
   function setUpIma() {
     if (adsLoader || typeof google === 'undefined' || !google.ima) return;
@@ -509,52 +500,13 @@
 
   function onAdError() {
     if (adsManager) adsManager.destroy();
-    // VASTタグがエラー/フィル無しだった場合、視聴者を待たせすぎない範囲で
-    // 代わりの全画面広告(保険)を試す。保険広告も未設定ならそのままアンロックする。
-    setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
-  }
-
-  // 全画面広告(ExoClick AdProvider)を表示し、一定時間後にアンロックする。
-  // PCではこれが最初から使われる広告そのもの、スマホでは動画広告(VASTタグ)が
-  // 出せなかった時の保険として使われる。管理画面で設定したゾーンが無い場合は
-  // このまま(保険無し=従来通りそのままアンロック)にフォールバックする。
-  function startFallbackAd() {
-    if (adFinishedCalled || fallbackAdStarted) return;
-    fallbackAdStarted = true;
-
-    videoInfoPromise.then((info) => {
-      // 視聴ページのバナー広告と同じ判定で、PC/スマホ別々のゾーン(=別々のExoClick広告ユニット、
-      // クラス名も異なる)を出し分ける。動画広告は特にPC側でフィルしづらい実測があるため。
-      const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
-      const zoneId = isDesktopAd ? info.fallbackAdZoneIdDesktop : info.fallbackAdZoneIdMobile;
-      const zoneClass = isDesktopAd ? 'eas6a97888e35' : 'eas6a97888e33';
-      if (!zoneId) {
-        onAdFinished();
-        return;
-      }
-      // 動画広告の「読み込み中…」表示は隠さずそのまま引き継ぐ(一度隠してから
-      // 同じ文言を出し直すと、途切れて2回読み込みが入ったように見えるため)。
-      // フィルしたかどうかを検知する手段が無いので、フィルしなかった場合はこのまま
-      // 「読み込み中…」が表示され続け、フィルした場合は広告がこの上に重なる。
-      adContainerEl.innerHTML = '';
-      const ins = document.createElement('ins');
-      ins.className = zoneClass;
-      ins.setAttribute('data-zoneid', zoneId);
-      ins.style.display = 'block';
-      ins.style.width = '100%';
-      ins.style.height = '100%';
-      adContainerEl.appendChild(ins);
-      (window.AdProvider = window.AdProvider || []).push({ serve: {} });
-      setTimeout(onAdFinished, FALLBACK_AD_DISPLAY_MS);
-    }).catch(() => {
-      onAdFinished();
-    });
+    // VASTタグがエラー/フィル無しだった場合は、視聴者を待たせすぎずそのままアンロックする
+    setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
   }
 
   function startAdSimulation() {
     unlockBtn.disabled = true;
     adFinishedCalled = false;
-    fallbackAdStarted = false;
     overlay.classList.remove('hidden-el');
     selectedAdDebug.textContent = '';
 
@@ -565,23 +517,15 @@
     adPlayerWrap.classList.remove('hidden-el');
     adLoadingState.classList.remove('hidden-el');
 
-    // PCは動画広告(VASTタグ)がほぼフィルしない実測があるため、動画広告は試さず
-    // 最初から全画面広告(ExoClick AdProvider)を使う。スマホは引き続き動画広告を使う
-    // (スマホの動画広告がフィルしなかった場合の保険としても同じ全画面広告を使う)。
-    if (window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches) {
-      startFallbackAd();
-      return;
-    }
-
     if (!selectedAd.adCode || typeof google === 'undefined' || !google.ima) {
-      // 広告コード未設定、またはSDKが読み込めていない場合は保険の全画面広告を試す
-      setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
+      // 広告コード未設定、またはSDKが読み込めていない場合はそのままアンロックする
+      setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
       return;
     }
 
     setUpIma();
     if (!adsLoader) {
-      setTimeout(startFallbackAd, NO_AD_FALLBACK_WAIT_MS);
+      setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
       return;
     }
 
@@ -598,8 +542,9 @@
 
     adsLoader.requestAds(adsRequest);
     // 広告ネットワークからの応答自体が来ずADS_MANAGER_LOADED/AD_ERRORのどちらも
-    // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限(保険広告を試す)。
-    setTimeout(startFallbackAd, MAX_AD_WAIT_MS);
+    // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限。
+    // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
+    setTimeout(onAdFinished, MAX_AD_WAIT_MS);
   }
 
   function onAdFinished() {
@@ -690,8 +635,6 @@
           premiumButtonText: status.premiumButtonText,
           contentPageAdZoneIdMobile: status.contentPageAdZoneIdMobile,
           contentPageAdZoneIdDesktop: status.contentPageAdZoneIdDesktop,
-          fallbackAdZoneIdMobile: status.fallbackAdZoneIdMobile,
-          fallbackAdZoneIdDesktop: status.fallbackAdZoneIdDesktop,
           ownerCreatorId: status.ownerCreatorId,
           contactUrl: status.contactUrl,
         };

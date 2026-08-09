@@ -111,12 +111,10 @@
         img.alt = '';
         link.appendChild(img);
 
-        if (item.contentType === 'image') {
-          const badge = document.createElement('span');
-          badge.className = 'absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
-          badge.textContent = '画像';
-          link.appendChild(badge);
-        }
+        const badge = document.createElement('span');
+        badge.className = 'absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
+        badge.textContent = item.contentType === 'image' ? '画像' : '動画';
+        link.appendChild(badge);
 
         postsGrid.appendChild(link);
       });

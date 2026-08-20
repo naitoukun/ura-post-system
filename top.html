@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<!-- 今は管理者ログイン中のみ表示されるプレビュー段階のページなので、念のため検索エンジンには
+     インデックスさせない(一般公開する段になったら外す想定)。 -->
+<meta name="robots" content="noindex, nofollow">
+<title>ura-post.com</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent-teal:#7fccc0;
+    --accent-teal-dark:#4a9d90;
+    --bg-page:#faf3ea;
+  }
+  html,body{
+    background:var(--bg-page);
+    font-family:'Noto Sans JP',sans-serif;
+  }
+  .card{
+    background:#ffffff;
+    border:1px solid #efe6d8;
+    box-shadow:0 4px 20px rgba(120,90,50,0.08);
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+  }
+  .brand{
+    font-family:'Outfit','Noto Sans JP',sans-serif;
+    font-weight:800;
+    letter-spacing:-0.02em;
+  }
+  .brand-accent{
+    color:var(--accent-teal-dark);
+  }
+</style>
+</head>
+<body class="min-h-screen w-full p-4" style="background:var(--bg-page);">
+
+<!-- 年齢確認ゲート。index.htmlと同じ挙動(一度「はい」を選ぶとlocalStorageに記録) -->
+<div id="ageGateOverlay" class="fixed inset-0 z-[100] flex items-center justify-center p-4" style="background:var(--bg-page);">
+  <div class="card rounded-2xl p-6 max-w-sm w-full text-center flex flex-col gap-4">
+    <p class="text-sm font-bold text-slate-700">当サイトはアダルトコンテンツを含みます</p>
+    <p class="text-xs text-slate-400">18歳未満の方のご利用はお断りしております。あなたは18歳以上ですか？</p>
+    <div class="flex gap-2">
+      <button id="ageGateYes" type="button" class="btn-primary flex-1 rounded-xl py-3 text-sm font-bold">
+        はい（18歳以上です）
+      </button>
+      <button id="ageGateNo" type="button" class="flex-1 border border-slate-200 text-slate-500 rounded-xl py-3 text-sm font-medium hover:bg-slate-50">
+        いいえ
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="w-full max-w-md mx-auto flex flex-col gap-4 py-4">
+  <div>
+    <h1 class="brand text-xl"><span class="text-slate-800">URA-POST</span><span class="brand-accent">.COM</span></h1>
+    <p class="text-xs text-slate-400 mt-1">新着投稿一覧（プレビュー版・管理者のみ表示）</p>
+  </div>
+
+  <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
+  <div id="emptyText" class="hidden-el text-sm text-slate-400">投稿が見つかりませんでした。</div>
+  <div id="postsGrid" class="grid grid-cols-3 gap-2"></div>
+</div>
+
+<script>
+(function () {
+  const ageGateOverlay = document.getElementById('ageGateOverlay');
+  const ageGateYes = document.getElementById('ageGateYes');
+  const ageGateNo = document.getElementById('ageGateNo');
+
+  if (localStorage.getItem('ageVerified') === '1') {
+    ageGateOverlay.style.display = 'none';
+  }
+  ageGateYes.addEventListener('click', () => {
+    localStorage.setItem('ageVerified', '1');
+    ageGateOverlay.style.display = 'none';
+  });
+  ageGateNo.addEventListener('click', () => {
+    location.href = 'https://www.google.com/';
+  });
+
+  const loadingText = document.getElementById('loadingText');
+  const emptyText = document.getElementById('emptyText');
+  const postsGrid = document.getElementById('postsGrid');
+
+  fetch('/api/top-posts', { cache: 'no-store' })
+    .then((res) => res.json())
+    .then((data) => {
+      loadingText.classList.add('hidden-el');
+      const items = (data && data.items) || [];
+      if (!items.length) {
+        emptyText.classList.remove('hidden-el');
+        return;
+      }
+      items.forEach((item) => {
+        const cell = document.createElement('div');
+        cell.className = 'flex flex-col gap-1';
+
+        const link = document.createElement('a');
+        link.href = '/?v=' + encodeURIComponent(item.id);
+        link.className = 'block aspect-square rounded-lg overflow-hidden bg-gray-100 relative';
+
+        const img = document.createElement('img');
+        img.src = item.thumbnailUrl || '/og-image';
+        img.className = 'w-full h-full object-cover';
+        img.alt = '';
+        link.appendChild(img);
+
+        const badge = document.createElement('span');
+        badge.className = 'absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
+        badge.textContent = item.contentType === 'image' ? '画像' : '動画';
+        link.appendChild(badge);
+
+        cell.appendChild(link);
+
+        // 投稿者名タグ(あれば)。押すとその投稿者の一覧(/creator-posts/<id>)に飛ぶ。
+        if (item.ownerCreatorId && item.creatorDisplayName) {
+          const tag = document.createElement('a');
+          tag.href = '/creator-posts/' + encodeURIComponent(item.ownerCreatorId);
+          tag.className = 'text-[10px] text-teal-700 truncate hover:underline';
+          tag.textContent = item.creatorDisplayName;
+          cell.appendChild(tag);
+        }
+
+        postsGrid.appendChild(cell);
+      });
+    })
+    .catch(() => {
+      loadingText.classList.add('hidden-el');
+      emptyText.classList.remove('hidden-el');
+    });
+})();
+</script>
+
+<style>
+  .hidden-el{ display:none !important; }
+</style>
+
+</body>
+</html>

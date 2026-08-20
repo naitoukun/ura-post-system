@@ -1,9 +1,12 @@
 """
 シークレット・ビューア: 開発用の簡易バックエンド。
 
-- GET  /                動画アンロックページ(index.html)。共有リンク専用にするため
-                        一覧等は置かず、常にindex.htmlを返す。og:image等は?vに応じて動的に差し込む
-- GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示)
+- GET  /                通常は動画アンロックページ(index.html)。共有リンク専用にするため
+                        一覧等は置かず、常にindex.htmlを返す。og:image等は?vに応じて動的に差し込む。
+                        例外: 管理者ログイン中に?v=無しでアクセスした場合だけ、一般公開に向けた
+                        プレビューとして新着投稿一覧(top.html)を返す
+- GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示。top.htmlへの切り替えは無し)
+- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧(JSON)※要ログイン
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
 - GET  /video-merge-tool  クリエイター向け動画結合ツール（ブラウザ内完結、ログイン不要）
@@ -1386,9 +1389,15 @@ class Handler(BaseHTTPRequestHandler):
         if len(path) > 1 and path.endswith("/"):
             path = path.rstrip("/")
         if path == "/":
-            # TOP(素のURL)は共有リンク専用。個別の?v=<動画ID>を知っている相手だけが
-            # 動画にたどり着ける状態にし、他の動画への回遊(一覧からの流出)は作らない。
-            self.handle_serve_unlock_page(parse_qs(split.query))
+            # TOP(素のURL)は本来、共有リンク専用(個別の?v=<動画ID>を知っている相手だけが
+            # 動画にたどり着ける)。ただし将来の一般公開に向けたプレビューとして、
+            # 管理者ログイン中・?v=無しの場合だけ新着投稿一覧(top.html)を見せる
+            # (それ以外の訪問者には今まで通りの挙動のまま)。
+            query = parse_qs(split.query)
+            if not query.get("v") and self.is_authenticated():
+                self.serve_file(os.path.join(BASE_DIR, "top.html"), "text/html; charset=utf-8")
+            else:
+                self.handle_serve_unlock_page(query)
         elif path == "/index.html":
             # 動画アンロックページへの直接アクセス用（?v=無しでも常にアプリを表示）
             self.handle_serve_unlock_page(parse_qs(split.query))
@@ -1448,6 +1457,12 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "all-posts.html"), "text/html; charset=utf-8")
         elif path == "/api/all-posts":
             self.handle_api_all_posts()
+        elif path == "/api/top-posts":
+            # top.html(TOPページのプレビュー)用のデータ。ページ自体と同じく管理者専用
+            # (URLを直接叩かれても一覧が漏れないよう、APIレベルでも認証必須にする)。
+            if self.require_auth():
+                return
+            self.handle_api_top_posts()
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -1894,6 +1909,42 @@ class Handler(BaseHTTPRequestHandler):
                     "uploadedAt": v.get("uploaded_at"),
                     "viewCount": v.get("view_count", 0),
                     "rawViewCount": v.get("raw_view_count", 0),
+                }
+                for v in items
+            ],
+        })
+
+    def handle_api_top_posts(self):
+        """公開TOPページ(/)の新着投稿一覧用データ。
+
+        /api/creator-postsと同じ条件(所有者不問・実体ファイルが存在・期限切れでない・
+        unlisted指定でない)で全投稿を横断して返す。ページ自体(handle_serve_unlock_page)
+        を管理者ログイン中しか出さないのと合わせ、このAPIも認証必須にしてある
+        (URLを直接叩かれても一覧が漏れないように)。
+        """
+        creators = load_creators()
+        videos_list = load_videos()
+        items = [
+            v for v in videos_list
+            if video_file_path(v)
+            and not get_time_limit_status(v)["expired"]
+            and not v.get("unlisted")
+        ]
+        items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
+
+        self.respond_json(200, {
+            "items": [
+                {
+                    "id": v["id"],
+                    "contentType": v.get("content_type", "video"),
+                    "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
+                    "uploadedAt": v.get("uploaded_at"),
+                    "ownerCreatorId": v.get("owner_creator_id"),
+                    "creatorDisplayName": (
+                        find_creator(creators, v.get("owner_creator_id")).get("display_name")
+                        if v.get("owner_creator_id") and find_creator(creators, v.get("owner_creator_id"))
+                        else None
+                    ),
                 }
                 for v in items
             ],

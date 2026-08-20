@@ -66,6 +66,13 @@
     <p class="text-sm font-bold text-slate-700 mt-1">Xで活動する女の子を応援するサイト💕</p>
     <p class="text-sm font-bold text-slate-700">限定画像や動画を多数掲載✨</p>
     <p class="text-sm font-bold text-slate-700">すべて無料で楽しめます🆓</p>
+    <a href="/creators" class="text-xs font-bold text-teal-700 hover:underline mt-1">投稿者一覧を見る →</a>
+  </div>
+
+  <!-- 埋もれ対策: 新着順とは別に、無作為に選んだ投稿を毎回出す枠(古い投稿にも光を当てる) -->
+  <div id="pickupSection" class="hidden-el flex flex-col gap-2">
+    <p class="text-xs font-bold text-slate-500">🎲 ピックアップ</p>
+    <div id="pickupGrid" class="grid grid-cols-3 gap-2"></div>
   </div>
 
   <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
@@ -104,12 +111,43 @@
   const loadingText = document.getElementById('loadingText');
   const emptyText = document.getElementById('emptyText');
   const postsGrid = document.getElementById('postsGrid');
+  const pickupSection = document.getElementById('pickupSection');
+  const pickupGrid = document.getElementById('pickupGrid');
+
+  // ピックアップ枠用の小さいサムネイル(コンテンツ種別バッジのみ、投稿者タグは省略してコンパクトに)
+  function buildThumbLink(item) {
+    const link = document.createElement('a');
+    link.href = '/?v=' + encodeURIComponent(item.id);
+    link.className = 'block aspect-square rounded-lg overflow-hidden bg-gray-100 relative';
+
+    const img = document.createElement('img');
+    img.src = item.thumbnailUrl || '/og-image';
+    img.className = 'w-full h-full object-cover';
+    img.alt = '';
+    link.appendChild(img);
+
+    const badge = document.createElement('span');
+    badge.className = 'absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
+    badge.textContent = item.contentType === 'image' ? '画像' : '動画';
+    link.appendChild(badge);
+
+    return link;
+  }
 
   fetch('/api/top-posts', { cache: 'no-store' })
     .then((res) => res.json())
     .then((data) => {
       loadingText.classList.add('hidden-el');
       const items = (data && data.items) || [];
+      const pickup = (data && data.pickup) || [];
+
+      if (pickup.length) {
+        pickupSection.classList.remove('hidden-el');
+        pickup.forEach((item) => {
+          pickupGrid.appendChild(buildThumbLink(item));
+        });
+      }
+
       if (!items.length) {
         emptyText.classList.remove('hidden-el');
         return;

@@ -6,7 +6,9 @@
                         例外: 管理者ログイン中に?v=無しでアクセスした場合だけ、一般公開に向けた
                         プレビューとして新着投稿一覧(top.html)を返す
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示。top.htmlへの切り替えは無し)
-- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧(JSON)※要ログイン
+- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧・ピックアップ枠(JSON)※要ログイン
+- GET  /creators        埋もれ対策: 全クリエイター一覧ページ。top.htmlと同じく管理者ログイン中のみ(それ以外は404)
+- GET  /api/creators-list  上記ページ用のクリエイター一覧(JSON)※要ログイン
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
 - GET  /video-merge-tool  クリエイター向け動画結合ツール（ブラウザ内完結、ログイン不要）
@@ -103,6 +105,7 @@ import io
 import json
 import mimetypes
 import os
+import random
 import re
 import secrets
 import struct
@@ -472,6 +475,10 @@ def points_to_yen(points):
 # (管理者自身の/api/uploadには適用しない)、満たさない場合はアップロード自体を拒否する。
 MIN_CREATOR_VIDEO_DURATION_SECONDS = 20
 MIN_CREATOR_IMAGE_COUNT = 5
+
+# TOPページ(top.html)の「ピックアップ」枠(新着順とは別に無作為抽出する投稿数)。
+# 埋もれ対策(投稿頻度が低い子の投稿が新着一覧から実質見えなくなるのを防ぐ)の一環。
+MAX_TOP_PICKUP_COUNT = 6
 
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
@@ -1463,6 +1470,17 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_api_top_posts()
+        elif path == "/creators":
+            # 埋もれ対策: 投稿順に関係なく全クリエイターを一覧できるページ。
+            # top.htmlと同じく、一般公開前のプレビューとして管理者ログイン中のみ表示する。
+            if not self.is_authenticated():
+                self.send_error(404, "Not Found")
+                return
+            self.serve_file(os.path.join(BASE_DIR, "creators.html"), "text/html; charset=utf-8")
+        elif path == "/api/creators-list":
+            if self.require_auth():
+                return
+            self.handle_api_creators_list()
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -1921,6 +1939,10 @@ class Handler(BaseHTTPRequestHandler):
         unlisted指定でない)で全投稿を横断して返す。ページ自体(handle_serve_unlock_page)
         を管理者ログイン中しか出さないのと合わせ、このAPIも認証必須にしてある
         (URLを直接叩かれても一覧が漏れないように)。
+
+        新着順(items)だけだと、投稿頻度が低い子の投稿がどんどん下に沈んで実質見えなく
+        なってしまうため、同じ母集団から無作為に選んだ「ピックアップ」枠(pickup)も
+        一緒に返す。呼ばれるたびに毎回抽選し直すので、特定の投稿が固定で埋もれ続けることはない。
         """
         creators = load_creators()
         videos_list = load_videos()
@@ -1930,25 +1952,61 @@ class Handler(BaseHTTPRequestHandler):
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
         ]
-        items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
-        self.respond_json(200, {
-            "items": [
-                {
-                    "id": v["id"],
-                    "contentType": v.get("content_type", "video"),
-                    "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
-                    "uploadedAt": v.get("uploaded_at"),
-                    "ownerCreatorId": v.get("owner_creator_id"),
-                    "creatorDisplayName": (
-                        find_creator(creators, v.get("owner_creator_id")).get("display_name")
-                        if v.get("owner_creator_id") and find_creator(creators, v.get("owner_creator_id"))
-                        else None
-                    ),
-                }
-                for v in items
-            ],
-        })
+        serialized = [
+            {
+                "id": v["id"],
+                "contentType": v.get("content_type", "video"),
+                "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
+                "uploadedAt": v.get("uploaded_at"),
+                "ownerCreatorId": v.get("owner_creator_id"),
+                "creatorDisplayName": (
+                    find_creator(creators, v.get("owner_creator_id")).get("display_name")
+                    if v.get("owner_creator_id") and find_creator(creators, v.get("owner_creator_id"))
+                    else None
+                ),
+            }
+            for v in items
+        ]
+
+        pickup = random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT))
+        serialized.sort(key=lambda x: x["uploadedAt"] or "", reverse=True)
+
+        self.respond_json(200, {"items": serialized, "pickup": pickup})
+
+    def handle_api_creators_list(self):
+        """埋もれ対策その2: 投稿順に関係なく、投稿が1件以上ある有効なクリエイターを
+        全員そのまま一覧できるAPI(/creatorsページ用)。TOPの新着一覧にしばらく
+        名前が出ていない子でも、ここから確実に/creator-posts/<id>にたどり着ける。
+        呼ばれるたびに順序をシャッフルし、特定の子が一覧の末尾に固定されないようにする。
+        """
+        creators = load_creators()
+        videos_list = load_videos()
+
+        def visible_post_count(creator_id):
+            return sum(
+                1 for v in videos_list
+                if v.get("owner_creator_id") == creator_id
+                and video_file_path(v)
+                and not get_time_limit_status(v)["expired"]
+                and not v.get("unlisted")
+            )
+
+        items = []
+        for c in creators:
+            if c.get("status") != "active":
+                continue
+            count = visible_post_count(c["id"])
+            if count == 0:
+                continue
+            items.append({
+                "id": c["id"],
+                "displayName": c.get("display_name") or "（名前未設定）",
+                "postCount": count,
+            })
+
+        random.shuffle(items)
+        self.respond_json(200, {"items": items})
 
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。

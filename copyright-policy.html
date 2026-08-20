@@ -54,6 +54,59 @@
     text-decoration:none;
   }
   a.back:hover{ text-decoration:underline; }
+  form.dmca-form{
+    margin-top:16px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  form.dmca-form label{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:13px;
+    color:#444;
+  }
+  form.dmca-form input,
+  form.dmca-form textarea{
+    font-family:inherit;
+    font-size:13.5px;
+    padding:8px 10px;
+    border:1px solid #ddd;
+    border-radius:6px;
+    background:#fff;
+  }
+  form.dmca-form textarea{
+    resize:vertical;
+    min-height:90px;
+  }
+  form.dmca-form button{
+    align-self:flex-start;
+    background:#0d9488;
+    color:#fff;
+    border:none;
+    border-radius:6px;
+    padding:10px 22px;
+    font-size:13.5px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  form.dmca-form button:disabled{
+    opacity:0.6;
+    cursor:default;
+  }
+  #dmcaFormMsg{
+    font-size:13px;
+    margin:0;
+  }
+  /* ハニーポット。通常の利用者には見せない(スパムボット対策) */
+  .hp-field{
+    position:absolute;
+    left:-9999px;
+    width:1px;
+    height:1px;
+    overflow:hidden;
+  }
 </style>
 </head>
 <body>
@@ -91,11 +144,85 @@
 
   <h2>3. 連絡先</h2>
   <p>
-    著作権侵害の申し立て・記録保管責任者へのお問い合わせは、以下よりご連絡ください。<br>
-    <a href="https://x.com/urapost_info" target="_blank" rel="noopener noreferrer" style="color:#0d9488;">お問い合わせ</a>
+    著作権侵害の申し立て・記録保管責任者へのお問い合わせは、以下のフォームよりご連絡ください。内容を確認のうえ対応いたします。
+  </p>
+
+  <form class="dmca-form" id="dmcaForm">
+    <label class="hp-field" aria-hidden="true">
+      Website（入力しないでください）
+      <input type="text" name="website" tabindex="-1" autocomplete="off">
+    </label>
+    <label>
+      お名前（任意）
+      <input type="text" name="name" maxlength="100">
+    </label>
+    <label>
+      メールアドレス（必須・ご返信に使用します）
+      <input type="email" name="email" required maxlength="200">
+    </label>
+    <label>
+      対象コンテンツのURL（必須）
+      <input type="text" name="url" required maxlength="500" placeholder="https://ura-post.com/?v=...">
+    </label>
+    <label>
+      申し立て内容（必須）
+      <textarea name="message" required maxlength="4000" placeholder="侵害の内容、著作権者との関係、ご連絡先（住所・電話番号）などをご記入ください"></textarea>
+    </label>
+    <button type="submit" id="dmcaSubmitBtn">送信する</button>
+    <p id="dmcaFormMsg"></p>
+  </form>
+
+  <p style="margin-top:20px;">
+    SNSでのご連絡も可能です: <a href="https://x.com/urapost_info" target="_blank" rel="noopener noreferrer" style="color:#0d9488;">X (@urapost_info)</a>
   </p>
 
   <a class="back" href="/index.html">← 動画ページに戻る</a>
 </div>
+<script>
+(function () {
+  var form = document.getElementById('dmcaForm');
+  var msg = document.getElementById('dmcaFormMsg');
+  var btn = document.getElementById('dmcaSubmitBtn');
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    msg.textContent = '';
+    msg.style.color = '';
+    btn.disabled = true;
+
+    var formData = new FormData(form);
+    fetch('/api/dmca-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        website: formData.get('website'),
+        name: formData.get('name'),
+        email: formData.get('email'),
+        url: formData.get('url'),
+        message: formData.get('message'),
+      }),
+    })
+      .then(function (res) {
+        return res.json().then(function (data) { return { status: res.status, data: data }; });
+      })
+      .then(function (result) {
+        if (result.status === 200 && result.data.ok) {
+          form.reset();
+          msg.textContent = '送信しました。内容を確認のうえ対応いたします。';
+          msg.style.color = '#0d9488';
+        } else {
+          btn.disabled = false;
+          msg.textContent = '送信に失敗しました。入力内容をご確認のうえ、しばらく経ってから再度お試しください。';
+          msg.style.color = '#e11d48';
+        }
+      })
+      .catch(function () {
+        btn.disabled = false;
+        msg.textContent = '通信エラーが発生しました。しばらく経ってから再度お試しください。';
+        msg.style.color = '#e11d48';
+      });
+  });
+})();
+</script>
 </body>
 </html>

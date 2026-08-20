@@ -375,6 +375,14 @@
     </div>
     <p id="ogImageResultMsg" class="text-sm"></p>
   </form>
+
+  <div>
+    <h2 class="text-lg font-bold text-slate-800">DMCA/著作権の申し立て</h2>
+    <p class="text-xs text-slate-400 mt-1"><a href="/copyright-policy" target="_blank" rel="noopener noreferrer" class="underline">著作権ポリシーページ</a>のフォームから送信された申し立てです。</p>
+  </div>
+  <div id="dmcaReportsBox" class="flex flex-col gap-2">
+    <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
+  </div>
 </div>
 
 <script>
@@ -435,6 +443,8 @@
   const ogImageResetBtn = document.getElementById('ogImageResetBtn');
   const ogImageResultMsg= document.getElementById('ogImageResultMsg');
 
+  const dmcaReportsBox = document.getElementById('dmcaReportsBox');
+
   // セッション切れ(401)の場合は、ログイン画面に戻す
   function redirectIfUnauthenticated(status) {
     if (status === 401) {
@@ -457,6 +467,7 @@
   refreshOgImageStatus();
   refreshPointsStatus();
   refreshCreatorList();
+  refreshDmcaReports();
 
   function refreshOgImageStatus() {
     fetch('/site-config', { cache: 'no-store' })
@@ -1509,6 +1520,114 @@
     row.appendChild(btnGroup);
 
     return row;
+  }
+
+  function refreshDmcaReports() {
+    fetch('/api/dmca-reports', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200) {
+          renderDmcaReports(data);
+        } else {
+          dmcaReportsBox.innerHTML =
+            '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+        }
+      })
+      .catch(() => {
+        dmcaReportsBox.innerHTML =
+          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+      });
+  }
+
+  function renderDmcaReports(reports) {
+    const pending = reports.filter((r) => !r.resolved);
+
+    if (!pending.length) {
+      dmcaReportsBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">未対応の申し立てはありません。</div>';
+      return;
+    }
+
+    // 送信日時が古い順(先に来た申し立てから対応できるように)
+    pending.sort((a, b) => (a.submittedAt || '').localeCompare(b.submittedAt || ''));
+
+    dmcaReportsBox.innerHTML = '';
+    pending.forEach((report) => {
+      dmcaReportsBox.appendChild(buildDmcaReportRow(report));
+    });
+  }
+
+  function buildDmcaReportRow(report) {
+    const card = document.createElement('div');
+    card.className = 'card rounded-2xl p-4 flex flex-col gap-2 text-sm';
+
+    const meta = document.createElement('p');
+    meta.className = 'text-slate-700 font-medium';
+    meta.textContent = (report.name || '（名前未入力）') + ' <' + report.email + '> - ' + report.submittedAt;
+    card.appendChild(meta);
+
+    const urlLine = document.createElement('p');
+    urlLine.className = 'text-xs text-slate-500 break-all';
+    const urlLabel = document.createTextNode('対象URL: ');
+    urlLine.appendChild(urlLabel);
+    const urlLink = document.createElement('a');
+    urlLink.href = report.url;
+    urlLink.target = '_blank';
+    urlLink.rel = 'noopener noreferrer';
+    urlLink.className = 'underline text-teal-600';
+    urlLink.textContent = report.url;
+    urlLine.appendChild(urlLink);
+    card.appendChild(urlLine);
+
+    const message = document.createElement('p');
+    message.className = 'text-xs text-slate-600 whitespace-pre-wrap';
+    message.textContent = report.message;
+    card.appendChild(message);
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'flex gap-2 shrink-0';
+
+    const mailBtn = document.createElement('a');
+    mailBtn.href = 'mailto:' + encodeURIComponent(report.email);
+    mailBtn.textContent = 'メールで返信';
+    mailBtn.className = 'border border-slate-200 text-slate-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-50';
+    btnGroup.appendChild(mailBtn);
+
+    const resolveBtn = document.createElement('button');
+    resolveBtn.type = 'button';
+    resolveBtn.textContent = '対応済みにする';
+    resolveBtn.className = 'border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+    resolveBtn.addEventListener('click', () => {
+      resolveDmcaReport(report.id, resolveBtn);
+    });
+    btnGroup.appendChild(resolveBtn);
+    card.appendChild(btnGroup);
+
+    return card;
+  }
+
+  function resolveDmcaReport(id, btn) {
+    btn.disabled = true;
+    fetch('/api/dmca-reports/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          refreshDmcaReports();
+        } else {
+          btn.disabled = false;
+          alert('更新に失敗しました（' + (data.error || status) + '）');
+        }
+      })
+      .catch(() => {
+        btn.disabled = false;
+        alert('通信エラーが発生しました。');
+      });
   }
 
   function refreshLinkStatus() {

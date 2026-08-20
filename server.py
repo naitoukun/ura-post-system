@@ -40,6 +40,9 @@
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数・ボーナス閲覧数閾値とボーナス付与量）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
 - POST /api/reset-og-image  OGP画像を同梱の既定画像に戻す（JSON）※要ログイン
+- POST /api/dmca-report  著作権侵害の申し立てフォームからの送信（/copyright-policy用。公開・ログイン不要。JSON）
+- GET  /api/dmca-reports  著作権侵害の申し立て一覧（JSON）※要ログイン
+- POST /api/dmca-reports/resolve  著作権侵害の申し立てを対応済みにする（JSON）※要ログイン
 
 クリエイター(女の子)アカウント。管理者(上記の/api/login)とは完全に別のセッション/Cookieで扱う:
 - GET  /join/<invite_token>  招待受諾ページ。パスワードを設定してアカウントを有効化する
@@ -470,6 +473,81 @@ MIN_CREATOR_IMAGE_COUNT = 5
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
 CREATORS_LOCK = threading.Lock()
+
+# ---------- DMCA/著作権侵害の申し立て(/copyright-policy のフォーム) ----------
+# 広告ネットワーク(ExoClick)の審査要件で、2257準拠声明に加えて「専用のメールアドレスまたは
+# 問い合わせフォーム」が必須とされたため、SNS(X)のDMだけだった連絡手段をこのフォームに変更した。
+DMCA_REPORTS_PATH = os.path.join(UPLOAD_DIR, "dmca_reports.json")
+DMCA_REPORTS_LOCK = threading.Lock()
+MAX_DMCA_NAME_LENGTH = 100
+MAX_DMCA_EMAIL_LENGTH = 200
+MAX_DMCA_URL_LENGTH = 500
+MAX_DMCA_MESSAGE_LENGTH = 4000
+
+# 公開・ログイン不要のフォームのため、荒らし/スパム対策として同一IPからの連投を軽く制限する。
+DMCA_SUBMISSIONS = {}  # ip -> [timestamp, ...]（直近の送信時刻。ウィンドウ外の古いものは随時間引く）
+DMCA_SUBMISSIONS_LOCK = threading.Lock()
+DMCA_SUBMISSION_WINDOW_SECONDS = 60 * 60
+MAX_DMCA_SUBMISSIONS_PER_IP_PER_WINDOW = 3
+
+
+def is_dmca_submission_rate_limited(ip):
+    """直近DMCA_SUBMISSION_WINDOW_SECONDS以内の同一IPからの送信回数が上限を超えていればTrue。"""
+    now = time.time()
+    with DMCA_SUBMISSIONS_LOCK:
+        recent = [t for t in DMCA_SUBMISSIONS.get(ip, []) if now - t < DMCA_SUBMISSION_WINDOW_SECONDS]
+        if len(recent) >= MAX_DMCA_SUBMISSIONS_PER_IP_PER_WINDOW:
+            DMCA_SUBMISSIONS[ip] = recent
+            return True
+        recent.append(now)
+        DMCA_SUBMISSIONS[ip] = recent
+        return False
+
+
+def load_dmca_reports():
+    if not os.path.exists(DMCA_REPORTS_PATH):
+        return []
+    with open(DMCA_REPORTS_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_dmca_reports(reports):
+    with open(DMCA_REPORTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(reports, f, ensure_ascii=False)
+
+
+def validate_dmca_report(data):
+    """/copyright-policy のフォーム入力値をチェックする。
+
+    成功時は (フィールドの辞書, None) を、失敗時は (None, エラーコード) を返す。
+    """
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip()
+    url = (data.get("url") or "").strip()
+    message = (data.get("message") or "").strip()
+
+    if len(name) > MAX_DMCA_NAME_LENGTH:
+        return None, "invalid_name"
+    if not email or len(email) > MAX_DMCA_EMAIL_LENGTH or "@" not in email:
+        return None, "invalid_email"
+    if not url or len(url) > MAX_DMCA_URL_LENGTH:
+        return None, "invalid_url"
+    if not message or len(message) > MAX_DMCA_MESSAGE_LENGTH:
+        return None, "invalid_message"
+
+    return {"name": name, "email": email, "url": url, "message": message}, None
+
+
+def serialize_dmca_report(r):
+    return {
+        "id": r["id"],
+        "name": r.get("name") or "",
+        "email": r["email"],
+        "url": r["url"],
+        "message": r["message"],
+        "submittedAt": r["submitted_at"],
+        "resolved": r.get("resolved", False),
+    }
 
 
 def load_creators():
@@ -1374,6 +1452,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_list_videos()
+        elif path == "/api/dmca-reports":
+            if self.require_auth():
+                return
+            self.handle_list_dmca_reports()
         elif path == "/resolve-video":
             self.handle_resolve_video(parse_qs(split.query))
         elif path.startswith("/video/"):
@@ -1904,6 +1986,13 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_reset_og_image()
+        elif path == "/api/dmca-report":
+            # 公開・ログイン不要(/copyright-policyのフォームから誰でも送信できる)
+            self.handle_dmca_report()
+        elif path == "/api/dmca-reports/resolve":
+            if self.require_auth():
+                return
+            self.handle_resolve_dmca_report()
         elif path == "/api/creator/register":
             self.handle_creator_register()
         elif path == "/api/creator/magic-link-enter":
@@ -3661,6 +3750,82 @@ class Handler(BaseHTTPRequestHandler):
             request["status"] = "fulfilled"
             request["fulfilled_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             save_creators(creators)
+
+        self.respond_json(200, {"ok": True})
+
+    # ---------- DMCA/著作権侵害の申し立て(/copyright-policy のフォーム) ----------
+
+    def handle_dmca_report(self):
+        client_ip = get_client_ip(self)
+        if is_dmca_submission_rate_limited(client_ip):
+            self.respond_json(429, {"ok": False, "error": "too_many_requests"})
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 10_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        # ハニーポット: 通常の利用者には見えない隠しフィールド。埋まっていればボットとみなし、
+        # 送信者には成功したように見せつつ実際には保存しない。
+        if (data.get("website") or "").strip():
+            self.respond_json(200, {"ok": True})
+            return
+
+        fields, error = validate_dmca_report(data)
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        with DMCA_REPORTS_LOCK:
+            reports = load_dmca_reports()
+            reports.append({
+                "id": secrets.token_urlsafe(9),
+                "name": fields["name"],
+                "email": fields["email"],
+                "url": fields["url"],
+                "message": fields["message"],
+                "submitted_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "resolved": False,
+            })
+            save_dmca_reports(reports)
+
+        self.respond_json(200, {"ok": True})
+
+    def handle_list_dmca_reports(self):
+        with DMCA_REPORTS_LOCK:
+            reports = load_dmca_reports()
+        reports.sort(key=lambda r: r.get("submitted_at", ""), reverse=True)
+        self.respond_json(200, [serialize_dmca_report(r) for r in reports])
+
+    def handle_resolve_dmca_report(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        report_id = data.get("id")
+
+        with DMCA_REPORTS_LOCK:
+            reports = load_dmca_reports()
+            report = next((r for r in reports if r["id"] == report_id), None)
+            if not report:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+            report["resolved"] = True
+            save_dmca_reports(reports)
 
         self.respond_json(200, {"ok": True})
 

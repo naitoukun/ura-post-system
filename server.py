@@ -7,8 +7,6 @@
                         プレビューとして新着投稿一覧(top.html)を返す
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示。top.htmlへの切り替えは無し)
 - GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧・ピックアップ枠(JSON)※要ログイン
-- GET  /creators        埋もれ対策: 全クリエイター一覧ページ。top.htmlと同じく管理者ログイン中のみ(それ以外は404)
-- GET  /api/creators-list  上記ページ用のクリエイター一覧(JSON)※要ログイン
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
 - GET  /video-merge-tool  クリエイター向け動画結合ツール（ブラウザ内完結、ログイン不要）
@@ -1470,17 +1468,6 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_api_top_posts()
-        elif path == "/creators":
-            # 埋もれ対策: 投稿順に関係なく全クリエイターを一覧できるページ。
-            # top.htmlと同じく、一般公開前のプレビューとして管理者ログイン中のみ表示する。
-            if not self.is_authenticated():
-                self.send_error(404, "Not Found")
-                return
-            self.serve_file(os.path.join(BASE_DIR, "creators.html"), "text/html; charset=utf-8")
-        elif path == "/api/creators-list":
-            if self.require_auth():
-                return
-            self.handle_api_creators_list()
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -1973,40 +1960,6 @@ class Handler(BaseHTTPRequestHandler):
         serialized.sort(key=lambda x: x["uploadedAt"] or "", reverse=True)
 
         self.respond_json(200, {"items": serialized, "pickup": pickup})
-
-    def handle_api_creators_list(self):
-        """埋もれ対策その2: 投稿順に関係なく、投稿が1件以上ある有効なクリエイターを
-        全員そのまま一覧できるAPI(/creatorsページ用)。TOPの新着一覧にしばらく
-        名前が出ていない子でも、ここから確実に/creator-posts/<id>にたどり着ける。
-        呼ばれるたびに順序をシャッフルし、特定の子が一覧の末尾に固定されないようにする。
-        """
-        creators = load_creators()
-        videos_list = load_videos()
-
-        def visible_post_count(creator_id):
-            return sum(
-                1 for v in videos_list
-                if v.get("owner_creator_id") == creator_id
-                and video_file_path(v)
-                and not get_time_limit_status(v)["expired"]
-                and not v.get("unlisted")
-            )
-
-        items = []
-        for c in creators:
-            if c.get("status") != "active":
-                continue
-            count = visible_post_count(c["id"])
-            if count == 0:
-                continue
-            items.append({
-                "id": c["id"],
-                "displayName": c.get("display_name") or "（名前未設定）",
-                "postCount": count,
-            })
-
-        random.shuffle(items)
-        self.respond_json(200, {"items": items})
 
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。

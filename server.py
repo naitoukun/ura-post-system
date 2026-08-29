@@ -6,7 +6,9 @@
                         例外: 管理者ログイン中に?v=無しでアクセスした場合だけ、一般公開に向けた
                         プレビューとして新着投稿一覧(top.html)を返す
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示。top.htmlへの切り替えは無し)
-- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧・ピックアップ枠(JSON)※要ログイン
+- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧・ピックアップ枠(JSON、offset/limitでページング)※要ログイン
+- GET  /robots.txt      クローラー向け設定(静的ファイル)
+- GET  /sitemap.xml     検索エンジン向けの投稿URL一覧(公開・認証不要。TOPページが一般公開されるまでは実質未使用)
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
 - GET  /video-merge-tool  クリエイター向け動画結合ツール（ブラウザ内完結、ログイン不要）
@@ -477,6 +479,11 @@ MIN_CREATOR_IMAGE_COUNT = 5
 # TOPページ(top.html)の「ピックアップ」枠(新着順とは別に無作為抽出する投稿数)。
 # 埋もれ対策(投稿頻度が低い子の投稿が新着一覧から実質見えなくなるのを防ぐ)の一環。
 MAX_TOP_PICKUP_COUNT = 6
+
+# TOPページの新着一覧(/api/top-posts)のページングの1ページあたり件数。
+# 投稿数が増えても1回のレスポンス/初回表示が肥大化しないようにする。
+TOP_POSTS_PAGE_SIZE = 20
+MAX_TOP_POSTS_PAGE_SIZE = 50
 
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
@@ -1448,6 +1455,10 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file(os.path.join(BASE_DIR, "favicon-32x32.png"), "image/png")
         elif path == "/apple-touch-icon.png":
             self.serve_file(os.path.join(BASE_DIR, "apple-touch-icon.png"), "image/png")
+        elif path == "/robots.txt":
+            self.serve_file(os.path.join(BASE_DIR, "robots.txt"), "text/plain; charset=utf-8")
+        elif path == "/sitemap.xml":
+            self.handle_serve_sitemap()
         elif path.startswith("/thumb/"):
             self.handle_serve_thumbnail(path[len("/thumb/"):])
         elif path.startswith("/stats/"):
@@ -1467,7 +1478,7 @@ class Handler(BaseHTTPRequestHandler):
             # (URLを直接叩かれても一覧が漏れないよう、APIレベルでも認証必須にする)。
             if self.require_auth():
                 return
-            self.handle_api_top_posts()
+            self.handle_api_top_posts(parse_qs(split.query))
         elif path == "/api/videos":
             if self.require_auth():
                 return
@@ -1919,7 +1930,42 @@ class Handler(BaseHTTPRequestHandler):
             ],
         })
 
-    def handle_api_top_posts(self):
+    def handle_serve_sitemap(self):
+        """検索エンジン向けのsitemap.xml(公開・認証不要)。
+
+        現時点ではTOPページ(/)自体がまだ管理者プレビュー段階(noindex)のため実質参照
+        されないが、一般公開する段になってすぐ使えるよう先に用意しておく。掲載するのは
+        現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・期限切れ・unlistedは除外)。
+        """
+        videos_list = load_videos()
+        items = [
+            v for v in videos_list
+            if video_file_path(v)
+            and not get_time_limit_status(v)["expired"]
+            and not v.get("unlisted")
+        ]
+        items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
+
+        urls = [PUBLIC_SITE_URL + "/"] + [
+            PUBLIC_SITE_URL + "/?v=" + v["id"] for v in items
+        ]
+        entries = "".join(
+            "<url><loc>" + html.escape(u) + "</loc></url>" for u in urls
+        )
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            + entries +
+            "</urlset>"
+        ).encode("utf-8")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/xml; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_api_top_posts(self, query):
         """公開TOPページ(/)の新着投稿一覧用データ。
 
         /api/creator-postsと同じ条件(所有者不問・実体ファイルが存在・期限切れでない・
@@ -1930,7 +1976,21 @@ class Handler(BaseHTTPRequestHandler):
         新着順(items)だけだと、投稿頻度が低い子の投稿がどんどん下に沈んで実質見えなく
         なってしまうため、同じ母集団から無作為に選んだ「ピックアップ」枠(pickup)も
         一緒に返す。呼ばれるたびに毎回抽選し直すので、特定の投稿が固定で埋もれ続けることはない。
+
+        投稿数が増えても1回のレスポンスが肥大化しないよう、?offset=&limit=でページングする。
+        pickupは初回(offset=0)のレスポンスにのみ含める(2ページ目以降で重複して抽選し直す
+        意味が無いため)。
         """
+        try:
+            offset = max(0, int((query.get("offset") or ["0"])[0]))
+        except ValueError:
+            offset = 0
+        try:
+            limit = int((query.get("limit") or [str(TOP_POSTS_PAGE_SIZE)])[0])
+        except ValueError:
+            limit = TOP_POSTS_PAGE_SIZE
+        limit = max(1, min(limit, MAX_TOP_POSTS_PAGE_SIZE))
+
         creators = load_creators()
         videos_list = load_videos()
         items = [
@@ -1956,10 +2016,15 @@ class Handler(BaseHTTPRequestHandler):
             for v in items
         ]
 
-        pickup = random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT))
+        pickup = random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT)) if offset == 0 else None
         serialized.sort(key=lambda x: x["uploadedAt"] or "", reverse=True)
 
-        self.respond_json(200, {"items": serialized, "pickup": pickup})
+        page = serialized[offset:offset + limit]
+        response = {"items": page, "hasMore": offset + limit < len(serialized)}
+        if pickup is not None:
+            response["pickup"] = pickup
+
+        self.respond_json(200, response)
 
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。

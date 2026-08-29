@@ -11,6 +11,19 @@
 <meta name="robots" content="noindex, nofollow">
 <title>ura-post.com</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<!-- 視聴ページ(index.html)と同じバナー広告用(ExoClick AdProvider) -->
+<script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
+<!-- アクセス解析(GoatCounter)。index.htmlと同じ計測 -->
+<script data-goatcounter="https://ura-post.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+<!-- アクセス解析(Google アナリティクス)。index.htmlと同じ計測 -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-NPZ33E313T"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-NPZ33E313T');
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
@@ -68,6 +81,10 @@
     <p class="text-sm font-bold text-slate-700">すべて無料で楽しめます🆓</p>
   </div>
 
+  <!-- 視聴ページと同じバナー広告。PC/スマホでゾーンID・タグが異なるため、判定した方の
+       <ins>だけを生成する(index.htmlと同じ方式)。 -->
+  <div id="topAdWrap" class="hidden-el w-full"></div>
+
   <!-- 埋もれ対策: 新着順とは別に、無作為に選んだ投稿を毎回出す枠(古い投稿にも光を当てる) -->
   <div id="pickupSection" class="hidden-el flex flex-col gap-2">
     <p class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">💎 ピックアップ 💎</p>
@@ -79,6 +96,8 @@
   <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
   <div id="emptyText" class="hidden-el text-sm text-slate-400">投稿が見つかりませんでした。</div>
   <div id="postsGrid" class="flex flex-col gap-4"></div>
+  <!-- 無限スクロール用の目印。これが画面内に入ったら次のページを読み込む -->
+  <div id="loadMoreSentinel" class="hidden-el text-center text-xs text-slate-400 py-2">読み込み中…</div>
 
   <!-- フッター（サイト実態と一致する表記。index.htmlと同じもの） -->
   <footer class="mt-4 text-center text-[11px] text-gray-400">
@@ -114,6 +133,10 @@
   const postsGrid = document.getElementById('postsGrid');
   const pickupSection = document.getElementById('pickupSection');
   const pickupGrid = document.getElementById('pickupGrid');
+  const loadMoreSentinel = document.getElementById('loadMoreSentinel');
+  const topAdWrap = document.getElementById('topAdWrap');
+  const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
+  const PAGE_SIZE = 20;
 
   // ピックアップ枠用の小さいサムネイル(コンテンツ種別バッジのみ、投稿者タグは省略してコンパクトに)
   function buildThumbLink(item) {
@@ -123,6 +146,7 @@
 
     const img = document.createElement('img');
     img.src = item.thumbnailUrl || '/og-image';
+    img.loading = 'lazy';
     img.className = 'w-full h-full object-cover';
     img.alt = '';
     link.appendChild(img);
@@ -135,73 +159,127 @@
     return link;
   }
 
-  fetch('/api/top-posts', { cache: 'no-store' })
-    .then((res) => res.json())
-    .then((data) => {
-      loadingText.classList.add('hidden-el');
-      const items = (data && data.items) || [];
-      const pickup = (data && data.pickup) || [];
+  // 新着一覧の1記事分のカード。上に投稿者名タグ+日付、下に大きめのサムネイル。
+  function buildPostCard(item) {
+    const card = document.createElement('article');
+    card.className = 'card rounded-2xl overflow-hidden flex flex-col';
 
-      if (pickup.length) {
-        pickupSection.classList.remove('hidden-el');
-        pickup.forEach((item) => {
-          pickupGrid.appendChild(buildThumbLink(item));
-        });
-      }
+    const meta = document.createElement('div');
+    meta.className = 'flex items-center justify-between gap-2 px-3 py-2';
 
-      if (!items.length) {
-        emptyText.classList.remove('hidden-el');
-        return;
-      }
-      items.forEach((item) => {
-        // 1記事ずつ縦に並べるカード。上に投稿者名タグ+日付、下に大きめのサムネイル。
-        const card = document.createElement('article');
-        card.className = 'card rounded-2xl overflow-hidden flex flex-col';
+    if (item.ownerCreatorId && item.creatorDisplayName) {
+      // 投稿者名タグ。押すとその投稿者の一覧(/creator-posts/<id>)に飛ぶ。
+      const tag = document.createElement('a');
+      tag.href = '/creator-posts/' + encodeURIComponent(item.ownerCreatorId);
+      tag.className = 'text-xs font-bold text-teal-700 truncate hover:underline';
+      tag.textContent = item.creatorDisplayName;
+      meta.appendChild(tag);
+    } else {
+      meta.appendChild(document.createElement('span'));
+    }
 
-        const meta = document.createElement('div');
-        meta.className = 'flex items-center justify-between gap-2 px-3 py-2';
+    const date = document.createElement('span');
+    date.className = 'text-[11px] text-slate-400 shrink-0';
+    date.textContent = (item.uploadedAt || '').slice(0, 10);
+    meta.appendChild(date);
 
-        if (item.ownerCreatorId && item.creatorDisplayName) {
-          // 投稿者名タグ。押すとその投稿者の一覧(/creator-posts/<id>)に飛ぶ。
-          const tag = document.createElement('a');
-          tag.href = '/creator-posts/' + encodeURIComponent(item.ownerCreatorId);
-          tag.className = 'text-xs font-bold text-teal-700 truncate hover:underline';
-          tag.textContent = item.creatorDisplayName;
-          meta.appendChild(tag);
-        } else {
-          meta.appendChild(document.createElement('span'));
+    card.appendChild(meta);
+
+    const link = document.createElement('a');
+    link.href = '/?v=' + encodeURIComponent(item.id);
+    link.className = 'block aspect-video overflow-hidden bg-gray-100 relative';
+
+    const img = document.createElement('img');
+    img.src = item.thumbnailUrl || '/og-image';
+    img.loading = 'lazy';
+    img.className = 'w-full h-full object-cover';
+    img.alt = '';
+    link.appendChild(img);
+
+    const badge = document.createElement('span');
+    badge.className = 'absolute bottom-1.5 right-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
+    badge.textContent = item.contentType === 'image' ? '画像' : '動画';
+    link.appendChild(badge);
+
+    card.appendChild(link);
+    return card;
+  }
+
+  // 視聴ページ(index.html)と同じバナー広告。PC/スマホでゾーンID・タグが異なるため、
+  // 判定した方の<ins>だけを生成する。
+  function loadTopAd() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((info) => {
+        const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
+        const zoneId = isDesktopAd ? info.contentPageAdZoneIdDesktop : info.contentPageAdZoneIdMobile;
+        if (!zoneId) return;
+        const ins = document.createElement('ins');
+        ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';
+        ins.setAttribute('data-zoneid', zoneId);
+        topAdWrap.innerHTML = '';
+        topAdWrap.appendChild(ins);
+        topAdWrap.classList.remove('hidden-el');
+        (window.AdProvider = window.AdProvider || []).push({ serve: {} });
+      })
+      .catch(() => {});
+  }
+  loadTopAd();
+
+  // 無限スクロール。offsetを進めながら/api/top-postsを叩き、末尾に追記していく。
+  let offset = 0;
+  let hasMore = true;
+  let isLoading = false;
+
+  function loadNextPage() {
+    if (isLoading || !hasMore) return;
+    isLoading = true;
+    loadMoreSentinel.classList.remove('hidden-el');
+
+    fetch('/api/top-posts?offset=' + offset + '&limit=' + PAGE_SIZE, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        loadingText.classList.add('hidden-el');
+        const items = (data && data.items) || [];
+        const pickup = (data && data.pickup) || null;
+
+        if (pickup && pickup.length) {
+          pickupSection.classList.remove('hidden-el');
+          pickup.forEach((item) => {
+            pickupGrid.appendChild(buildThumbLink(item));
+          });
         }
 
-        const date = document.createElement('span');
-        date.className = 'text-[11px] text-slate-400 shrink-0';
-        date.textContent = (item.uploadedAt || '').slice(0, 10);
-        meta.appendChild(date);
+        if (offset === 0 && !items.length) {
+          emptyText.classList.remove('hidden-el');
+        }
 
-        card.appendChild(meta);
+        items.forEach((item) => {
+          postsGrid.appendChild(buildPostCard(item));
+        });
 
-        const link = document.createElement('a');
-        link.href = '/?v=' + encodeURIComponent(item.id);
-        link.className = 'block aspect-video overflow-hidden bg-gray-100 relative';
-
-        const img = document.createElement('img');
-        img.src = item.thumbnailUrl || '/og-image';
-        img.className = 'w-full h-full object-cover';
-        img.alt = '';
-        link.appendChild(img);
-
-        const badge = document.createElement('span');
-        badge.className = 'absolute bottom-1.5 right-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
-        badge.textContent = item.contentType === 'image' ? '画像' : '動画';
-        link.appendChild(badge);
-
-        card.appendChild(link);
-        postsGrid.appendChild(card);
+        offset += items.length;
+        hasMore = Boolean(data && data.hasMore);
+        isLoading = false;
+        loadMoreSentinel.classList.add('hidden-el');
+        if (!hasMore) {
+          observer.disconnect();
+        }
+      })
+      .catch(() => {
+        loadingText.classList.add('hidden-el');
+        loadMoreSentinel.classList.add('hidden-el');
+        isLoading = false;
+        if (offset === 0) emptyText.classList.remove('hidden-el');
       });
-    })
-    .catch(() => {
-      loadingText.classList.add('hidden-el');
-      emptyText.classList.remove('hidden-el');
-    });
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) loadNextPage();
+  });
+  observer.observe(loadMoreSentinel);
+
+  loadNextPage();
 })();
 </script>
 

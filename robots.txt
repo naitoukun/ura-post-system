@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /admin
+Disallow: /admin/totp-setup
+Disallow: /creator
+Disallow: /creator-posts/
+Disallow: /stats/
+Disallow: /all-posts
+Disallow: /api/
+Disallow: /video-merge-tool
+
+Sitemap: https://ura-post.com/sitemap.xml

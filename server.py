@@ -88,6 +88,9 @@
   - TOTP_SECRET       管理者ログイン用の2段階認証シークレット（Base32。2つ目の要素）
   - UPLOAD_DIR        動画・設定ファイルの保存先（Renderでは永続ディスクのマウント先を指定）
   - PUBLIC_SITE_URL   OGP画像等の絶対URL組み立てに使う公開ドメイン（未設定時は https://ura-post.com）
+  - SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/NOTIFY_EMAIL_TO
+                      管理者への通知メール(新規投稿・ポイント交換申請・新規登録・身分証提出・
+                      DMCA申し立て)用のSMTP設定。SMTP_USER/SMTP_PASSWORD未設定なら通知は送られない
 
 TODO: 本番運用前に以下を必ず対応すること
   - UPLOAD_PASSPHRASE / TOTP_SECRET を推測されにくい値に変更する
@@ -108,9 +111,11 @@ import os
 import random
 import re
 import secrets
+import smtplib
 import struct
 import threading
 import time
+from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
@@ -378,6 +383,44 @@ def calculate_age(date_of_birth_str):
 # og:image等はSNS側のクローラーが絶対URLで取得するため、公開ドメインを固定で持っておく。
 # 別ドメインで動作確認する場合は環境変数で上書きできるようにしておく。
 PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://ura-post.com")
+
+# 管理者への通知メール(新規投稿・ポイント交換申請・新規登録・身分証提出・DMCA申し立て)用のSMTP設定。
+# SMTP_USER/SMTP_PASSWORDが未設定(空)の場合は通知メール機能そのものが無効になる
+# (開発環境やまだ設定していない本番環境で、送信エラーが表示・ログに出続けないようにするため)。
+# GmailのSMTPを使う場合、SMTP_PASSWORDにはGoogleアカウントの「アプリパスワード」を使う
+# (通常のログインパスワードではない。2段階認証を有効にした上でGoogleアカウント設定から発行する)。
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+NOTIFY_EMAIL_TO = os.environ.get("NOTIFY_EMAIL_TO", "naitoukun.n@gmail.com")
+
+
+def send_notification_email(subject, body):
+    """管理者への通知メールを(設定済みなら)非同期で送信する。
+
+    SMTP未設定なら何もしない。メール送信の失敗・遅延が本来の処理(投稿・申請等の
+    レスポンス)を止めないよう、必ず例外を握りつぶしたうえで別スレッドから送る。
+    """
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return
+
+    def _send():
+        try:
+            msg = EmailMessage()
+            msg["Subject"] = "[ura-post] " + subject
+            msg["From"] = SMTP_USER
+            msg["To"] = NOTIFY_EMAIL_TO
+            msg.set_content(body)
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+                smtp.starttls()
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+                smtp.send_message(msg)
+        except Exception:
+            pass
+
+    threading.Thread(target=_send, daemon=True).start()
+
 
 # 「URL発行時」ではなく「誰かが初めてそのURLにアクセスした時刻」を起点にするため、
 # 動画ごとに first_accessed_at (初回アクセス時刻) を記録し、そこから24時間で期限切れにする。
@@ -2775,6 +2818,13 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 save_videos(videos)
 
+            if owner_creator_id:
+                send_notification_email(
+                    "新規投稿(画像) - " + (creator.get("display_name") or "（名前未設定）"),
+                    (creator.get("display_name") or "（名前未設定）") + " さんが画像ギャラリーをアップロードしました。\n"
+                    + "投稿ID: " + content_id,
+                )
+
             self.respond_json(200, {
                 "ok": True,
                 "id": content_id,
@@ -2826,6 +2876,13 @@ class Handler(BaseHTTPRequestHandler):
                 **owner_fields,
             })
             save_videos(videos)
+
+        if owner_creator_id:
+            send_notification_email(
+                "新規投稿(動画) - " + (creator.get("display_name") or "（名前未設定）"),
+                (creator.get("display_name") or "（名前未設定）") + " さんが動画をアップロードしました。\n"
+                + "投稿ID: " + video_id,
+            )
 
         self.respond_json(200, {
             "ok": True,
@@ -3267,6 +3324,12 @@ class Handler(BaseHTTPRequestHandler):
             creator["id_reviewed_at"] = None
             creator["id_rejection_reason"] = None
             save_creators(creators)
+            display_name = creator.get("display_name") or "（名前未設定）"
+
+        send_notification_email(
+            "身分証提出 - " + display_name,
+            display_name + " さんが本人確認の身分証を提出しました。管理画面から確認・承認してください。",
+        )
 
         self.respond_json(200, {"ok": True, "idVerificationStatus": "pending"})
 
@@ -3428,6 +3491,12 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
             login_code = creator["login_code"]
             creator_id = creator["id"]
+            display_name = creator.get("display_name") or "（名前未設定）"
+
+        send_notification_email(
+            "新規登録 - " + display_name,
+            display_name + " さんが招待を受諾し、アカウントが有効化されました。",
+        )
 
         token = self.create_creator_session(creator_id)
         self.send_response(200)
@@ -3472,6 +3541,10 @@ class Handler(BaseHTTPRequestHandler):
                 creator["activated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 creator["terms_agreed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 save_creators(creators)
+                send_notification_email(
+                    "新規登録 - " + (creator.get("display_name") or "（名前未設定）"),
+                    (creator.get("display_name") or "（名前未設定）") + " さんが招待リンク(ライト版)を受諾し、アカウントが有効化されました。",
+                )
 
             creator_id = creator["id"]
 
@@ -3634,6 +3707,13 @@ class Handler(BaseHTTPRequestHandler):
             })
             save_creators(creators)
             new_balance = creator["points_balance"]
+            display_name = creator.get("display_name") or "（名前未設定）"
+
+        send_notification_email(
+            "ポイント交換申請 - " + display_name,
+            display_name + " さんがギフト券交換を申請しました。\n"
+            + str(points) + "pt（" + str(points_to_yen(points)) + "円分）",
+        )
 
         self.respond_json(200, {"ok": True, "pointsBalance": new_balance, "pointsBalanceYen": points_to_yen(new_balance)})
 
@@ -3922,6 +4002,13 @@ class Handler(BaseHTTPRequestHandler):
                 "resolved": False,
             })
             save_dmca_reports(reports)
+
+        send_notification_email(
+            "DMCA/著作権の申し立て",
+            "差出人: " + fields["name"] + " <" + fields["email"] + ">\n"
+            + "対象URL: " + fields["url"] + "\n\n"
+            + fields["message"],
+        )
 
         self.respond_json(200, {"ok": True})
 

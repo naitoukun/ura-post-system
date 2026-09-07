@@ -90,13 +90,6 @@
     color:#ffffff;
     transition:background .4s ease, box-shadow .4s ease;
   }
-  /* 動画再生中は控えめなグレーにして、再生し終わった瞬間に目立つ色へ切り替える */
-  .btn-premium.btn-muted{
-    animation:none;
-    background:#ece3d6;
-    color:#a89a86;
-    box-shadow:none;
-  }
 
   /* 「この子が気になる」「投稿一覧を見る」用。プレミアムCTA(コーラル)ほど強くは
      主張しないが、以前のグレー地味ボタンより目立たせたいので、ブランドのティール系で塗る。 */
@@ -251,7 +244,7 @@
       href="#"
       target="_blank"
       rel="noopener noreferrer"
-      class="btn-premium btn-muted w-full text-center py-4 rounded-xl text-base sm:text-lg font-bold tracking-wide block"
+      class="btn-premium w-full text-center py-4 rounded-xl text-base sm:text-lg font-bold tracking-wide block"
     >
       ♥ 【ファン限定】Fantia特設ページへ ♥
     </a>
@@ -590,9 +583,6 @@
       }
 
       if (info.contentType === 'image') {
-        // 画像は「視聴し終わる」という概念が無いので、ミュート演出はせず
-        // ギャラリーが開いたタイミングでそのまま目立つ色にする。
-        premiumLink.classList.remove('btn-muted');
         mainVideo.classList.add('hidden-el');
         imageGallery.classList.remove('hidden-el');
         imageGallery.innerHTML = '';
@@ -610,14 +600,6 @@
         }
         return;
       }
-
-      // 再生中はボタンを目立たせず、動画が最後まで再生され終わった瞬間に
-      // 目立つ色（既存のパルスアニメーション）へ切り替える。視聴後の一番
-      // 「次の行動を探している」タイミングで注目を集めるための演出。
-      premiumLink.classList.add('btn-muted');
-      mainVideo.addEventListener('ended', () => {
-        premiumLink.classList.remove('btn-muted');
-      }, { once: true });
 
       mainVideo.src = info.url;
       mainVideo.play().catch(() => {

@@ -351,6 +351,35 @@
   </form>
 
   <div>
+    <h2 class="text-lg font-bold text-slate-800">動画広告再生中バナー</h2>
+    <p class="text-xs text-slate-400 mt-1">動画広告(VASTタグ)再生中のオーバーレイ画面に表示するバナー広告です。視聴ページのバナーとは別ゾーン。空欄にすると非表示になります。</p>
+  </div>
+
+  <div id="adPageBannerStatusBox" class="card rounded-2xl p-4 text-sm text-slate-500">
+    現在の状態を確認しています…
+  </div>
+
+  <form id="adPageBannerForm" class="card rounded-2xl p-4 flex flex-col gap-4">
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">PC用の広告ゾーンID（空欄で非表示）</span>
+      <input type="text" name="zoneIdDesktop" maxlength="100" placeholder="例: 6024082"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-medium text-slate-700">スマホ用の広告ゾーンID（空欄で非表示）</span>
+      <input type="text" name="zoneIdMobile" maxlength="100" placeholder="例: 6024084"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </label>
+
+    <button type="submit" id="adPageBannerSubmitBtn" class="btn-primary rounded-lg py-3 text-sm font-bold">
+      更新
+    </button>
+
+    <p id="adPageBannerResultMsg" class="text-sm"></p>
+  </form>
+
+  <div>
     <h2 class="text-lg font-bold text-slate-800">OGP画像設定</h2>
     <p class="text-xs text-slate-400 mt-1">動画リンクをSNS等でシェアした時に表示されるカード画像です（動画の中身とは無関係の、サイト共通のブランド画像）。png/jpg/webp、5MBまで。</p>
   </div>
@@ -420,6 +449,12 @@
   const contentPageAdForm      = document.getElementById('contentPageAdForm');
   const contentPageAdSubmitBtn = document.getElementById('contentPageAdSubmitBtn');
   const contentPageAdResultMsg = document.getElementById('contentPageAdResultMsg');
+
+  const adPageBannerStatusBox = document.getElementById('adPageBannerStatusBox');
+  const adPageBannerForm      = document.getElementById('adPageBannerForm');
+  const adPageBannerSubmitBtn = document.getElementById('adPageBannerSubmitBtn');
+  const adPageBannerResultMsg = document.getElementById('adPageBannerResultMsg');
+
   const logoutBtn    = document.getElementById('logoutBtn');
 
   const pointsStatusBox = document.getElementById('pointsStatusBox');
@@ -464,6 +499,7 @@
   refreshLinkStatus();
   refreshAdsStatus();
   refreshContentPageAdStatus();
+  refreshAdPageBannerStatus();
   refreshOgImageStatus();
   refreshPointsStatus();
   refreshCreatorList();
@@ -1726,6 +1762,58 @@
         contentPageAdSubmitBtn.disabled = false;
         contentPageAdResultMsg.textContent = '通信エラーが発生しました。';
         contentPageAdResultMsg.classList.add('text-rose-500');
+      });
+  });
+
+  function refreshAdPageBannerStatus() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        const parts = [];
+        parts.push(data.adPageBannerZoneIdDesktop ? `PC: ${data.adPageBannerZoneIdDesktop}` : 'PC: 非表示');
+        parts.push(data.adPageBannerZoneIdMobile ? `スマホ: ${data.adPageBannerZoneIdMobile}` : 'スマホ: 非表示');
+        adPageBannerStatusBox.textContent = parts.join(' / ');
+        adPageBannerForm.elements.zoneIdDesktop.value = data.adPageBannerZoneIdDesktop || '';
+        adPageBannerForm.elements.zoneIdMobile.value = data.adPageBannerZoneIdMobile || '';
+      })
+      .catch(() => {
+        adPageBannerStatusBox.textContent = '状態の取得に失敗しました。';
+      });
+  }
+
+  adPageBannerForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    adPageBannerResultMsg.textContent = '';
+    adPageBannerResultMsg.className = 'text-sm';
+    adPageBannerSubmitBtn.disabled = true;
+
+    const formData = new FormData(adPageBannerForm);
+
+    fetch('/api/set-ad-page-banner', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        zoneIdDesktop: formData.get('zoneIdDesktop'),
+        zoneIdMobile: formData.get('zoneIdMobile'),
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        adPageBannerSubmitBtn.disabled = false;
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          adPageBannerResultMsg.textContent = '更新しました。';
+          adPageBannerResultMsg.classList.add('text-teal-600');
+          refreshAdPageBannerStatus();
+        } else {
+          adPageBannerResultMsg.textContent = '更新に失敗しました（' + (data.error || status) + '）';
+          adPageBannerResultMsg.classList.add('text-rose-500');
+        }
+      })
+      .catch(() => {
+        adPageBannerSubmitBtn.disabled = false;
+        adPageBannerResultMsg.textContent = '通信エラーが発生しました。';
+        adPageBannerResultMsg.classList.add('text-rose-500');
       });
   });
 

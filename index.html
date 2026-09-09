@@ -304,12 +304,15 @@
       <p class="text-sm font-bold text-white text-center px-4">読み込み中…</p>
     </div>
 
-    <!-- adLoadingStateより後ろに置き、動画広告/保険の全画面広告のどちらが実際に
-         レンダリングされても「読み込み中…」表示の上に重なって見えるようにする。
-         (動画広告はLOADEDイベントで明示的にadLoadingStateを隠すが、保険広告側は
-         フィルしたかどうかを検知できないため、重なり順で自然に見えるようにしておく) -->
+    <!-- adLoadingStateより後ろに置き、動画広告がレンダリングされても
+         「読み込み中…」表示の上に重なって見えるようにする
+         (動画広告はLOADEDイベントで明示的にadLoadingStateを隠す)。 -->
     <div id="adContainerEl" class="absolute inset-0"></div>
   </div>
+
+  <!-- 動画広告再生中(オーバーレイが出ている間)だけ表示するバナー広告。視聴者が
+       拘束されている間の枠を有効活用する。視聴ページのバナーとは別ゾーン。 -->
+  <div id="adPageBannerWrap" class="hidden-el w-full max-w-md"></div>
 
   <p id="selectedAdDebug" class="text-slate-300 text-[11px]"></p>
 </div>
@@ -334,6 +337,7 @@
   const interestedBtn = document.getElementById('interestedBtn');
   const postListBtn = document.getElementById('postListBtn');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
+  const adPageBannerWrap = document.getElementById('adPageBannerWrap');
   // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
   const teaserVideo = document.getElementById('teaserVideo');
@@ -521,11 +525,33 @@
     setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
   }
 
+  // 動画広告再生中のオーバーレイに表示するバナー広告。視聴ページのバナーと同じ方式
+  // (PC/スマホで判定した方の<ins>だけを生成)だが、別ゾーンなので個別に取得する。
+  function loadAdPageBanner() {
+    fetch('/site-config', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((info) => {
+        const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
+        const zoneId = isDesktopAd ? info.adPageBannerZoneIdDesktop : info.adPageBannerZoneIdMobile;
+        if (!zoneId) return;
+        const ins = document.createElement('ins');
+        ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';
+        ins.setAttribute('data-zoneid', zoneId);
+        adPageBannerWrap.innerHTML = '';
+        adPageBannerWrap.appendChild(ins);
+        adPageBannerWrap.classList.remove('hidden-el');
+        (window.AdProvider = window.AdProvider || []).push({ serve: {} });
+      })
+      .catch(() => {});
+  }
+
   function startAdSimulation() {
     unlockBtn.disabled = true;
     adFinishedCalled = false;
     overlay.classList.remove('hidden-el');
     selectedAdDebug.textContent = '';
+    adPageBannerWrap.classList.add('hidden-el');
+    loadAdPageBanner();
 
     // 画像ギャラリーも動画と同じ広告(VASTタグ)を、同じIMA SDKの仕組みで再生する
     // (画像専用の広告枠は廃止し、動画側の広告設定をそのまま使う)。

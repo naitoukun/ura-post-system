@@ -41,6 +41,7 @@
 - GET  /site-config     プレミアムリンク・誘導ボタンの文字・既定の広告設定等のサイト設定 (JSON)
 - POST /api/set-premium-link  プレミアムリンク・誘導ボタンの文字の更新（JSON）※要ログイン
 - POST /api/set-content-page-ad  視聴ページ(動画・画像共通)のバナー広告ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
+- POST /api/set-ad-page-banner  動画広告再生中オーバーレイのバナー広告ゾーンID(PC用/スマホ用)の更新・解除（JSON）※要ログイン
 - POST /api/set-ads     既定（個別設定が無い場合用）の動画側/画像側の広告の更新（JSON）※要ログイン
 - POST /api/set-points  クリエイターへのポイント付与ルール（動画/画像それぞれのアップロード1件の付与量・24時間以内の最低閲覧数・ボーナス閲覧数閾値とボーナス付与量）の既定値更新（JSON）※要ログイン
 - POST /api/set-og-image  OGP画像の差し替え（multipart/form-data）※要ログイン
@@ -458,6 +459,12 @@ DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE = "5968878"
 DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP = "5968882"
 MAX_CONTENT_PAGE_AD_ZONE_ID_LENGTH = 100
 
+# 動画広告(VASTタグ)再生中のオーバーレイ画面(視聴者が拘束されている間)に表示するバナー広告。
+# 上記の視聴ページバナーとはExoClick側で別ゾーンにして、収益を分けて計測できるようにしてある。
+DEFAULT_AD_PAGE_BANNER_ZONE_ID_MOBILE = "6024084"
+DEFAULT_AD_PAGE_BANNER_ZONE_ID_DESKTOP = "6024082"
+MAX_AD_PAGE_BANNER_ZONE_ID_LENGTH = 100
+
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -785,6 +792,8 @@ def load_config():
             "bonus_points_image": DEFAULT_BONUS_POINTS_IMAGE,
             "content_page_ad_zone_id_mobile": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE,
             "content_page_ad_zone_id_desktop": DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP,
+            "ad_page_banner_zone_id_mobile": DEFAULT_AD_PAGE_BANNER_ZONE_ID_MOBILE,
+            "ad_page_banner_zone_id_desktop": DEFAULT_AD_PAGE_BANNER_ZONE_ID_DESKTOP,
         }
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -803,6 +812,8 @@ def load_config():
     legacy_zone_id = config.pop("content_page_ad_zone_id", None)
     config.setdefault("content_page_ad_zone_id_mobile", legacy_zone_id or DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE)
     config.setdefault("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP)
+    config.setdefault("ad_page_banner_zone_id_mobile", DEFAULT_AD_PAGE_BANNER_ZONE_ID_MOBILE)
+    config.setdefault("ad_page_banner_zone_id_desktop", DEFAULT_AD_PAGE_BANNER_ZONE_ID_DESKTOP)
     # 旧: 全画面広告(フォールバック広告)機能は在庫(フィル)が無く廃止したため、
     # 過去に保存された設定値が残っていれば掃除する
     config.pop("fallback_ad_zone_id", None)
@@ -1585,6 +1596,8 @@ class Handler(BaseHTTPRequestHandler):
             "bonusPointsImage": config.get("bonus_points_image", DEFAULT_BONUS_POINTS_IMAGE),
             "contentPageAdZoneIdMobile": config.get("content_page_ad_zone_id_mobile", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_MOBILE),
             "contentPageAdZoneIdDesktop": config.get("content_page_ad_zone_id_desktop", DEFAULT_CONTENT_PAGE_AD_ZONE_ID_DESKTOP),
+            "adPageBannerZoneIdMobile": config.get("ad_page_banner_zone_id_mobile", DEFAULT_AD_PAGE_BANNER_ZONE_ID_MOBILE),
+            "adPageBannerZoneIdDesktop": config.get("ad_page_banner_zone_id_desktop", DEFAULT_AD_PAGE_BANNER_ZONE_ID_DESKTOP),
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -2144,6 +2157,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_content_page_ad()
+        elif path == "/api/set-ad-page-banner":
+            if self.require_auth():
+                return
+            self.handle_set_ad_page_banner()
         elif path == "/api/set-ads":
             if self.require_auth():
                 return
@@ -2380,6 +2397,37 @@ class Handler(BaseHTTPRequestHandler):
         config = load_config()
         config["content_page_ad_zone_id_mobile"] = zone_id_mobile
         config["content_page_ad_zone_id_desktop"] = zone_id_desktop
+        save_config(config)
+
+        self.respond_json(200, {"ok": True, "zoneIdMobile": zone_id_mobile, "zoneIdDesktop": zone_id_desktop})
+
+    def handle_set_ad_page_banner(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        # 汎用的な「ゾーンID文字列(空欄なら非表示)」のバリデーションなので、視聴ページの
+        # バナー広告用のバリデータをそのまま流用する。
+        zone_id_mobile, error = validate_content_page_ad_zone_id(data.get("zoneIdMobile"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        zone_id_desktop, error = validate_content_page_ad_zone_id(data.get("zoneIdDesktop"))
+        if error:
+            self.respond_json(400, {"ok": False, "error": error})
+            return
+
+        config = load_config()
+        config["ad_page_banner_zone_id_mobile"] = zone_id_mobile
+        config["ad_page_banner_zone_id_desktop"] = zone_id_desktop
         save_config(config)
 
         self.respond_json(200, {"ok": True, "zoneIdMobile": zone_id_mobile, "zoneIdDesktop": zone_id_desktop})

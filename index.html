@@ -692,6 +692,14 @@
     videoInfoPromise.then((info) => {
       track('content_unlocked', { content_type: info.contentType });
 
+      // ポイント付与の判定基準になる有効視聴数は、ここ(実際にアンロックされた瞬間)で
+      // サーバー側に記録する(ロック画面を開いただけでは加算されない・水増し対策)。
+      fetch('/api/mark-content-unlocked', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: info.id, token: info.mediaToken }),
+      }).catch(() => {});
+
       // 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンID・タグが異なるため、
       // 判定した方の<ins>だけを生成する(両方は作らない=片方だけに広告リクエストを飛ばす)。
       const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;

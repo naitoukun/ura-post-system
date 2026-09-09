@@ -1705,14 +1705,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if trusted_request:
-                # モザイク越しのロック画面が表示された回数を2種類カウントする
-                # (期限切れの場合はロック画面自体を表示しないため、ここではカウントしない)。
-                # - raw_view_count(総アクセス数): 読み込むたびに無条件で加算する生の回数
-                # - view_count(有効視聴回数): 同一IP+同一コンテンツは直近24時間で1回しかカウントしない
-                #   水増し対策版。ポイント付与判定はこちらを使う。
+                # raw_view_count(総アクセス数): ロック画面が表示された回数。読み込むたびに
+                # 無条件で加算する生の回数で、ポイント付与とは無関係の参考値。
+                # view_count(ポイント付与の判定基準となる有効視聴数)は、ここではなく
+                # /api/mark-content-unlocked(広告視聴フローを完走してアンロックされた
+                # 時点)で加算する。以前はここ(ロック画面を開いただけ)で加算していたが、
+                # それだと広告を一切見ずにIPを変えてページを開くだけで水増しできてしまって
+                # いたため。
                 video["raw_view_count"] = video.get("raw_view_count", 0) + 1
-                if should_count_view(requested_id, get_client_ip(self)):
-                    video["view_count"] = video.get("view_count", 0) + 1
                 save_videos(videos_list)
 
         config = load_config()
@@ -1742,6 +1742,46 @@ class Handler(BaseHTTPRequestHandler):
             "ownerCreatorId": owner_creator_id,
             "contactUrl": owner_creator.get("contact_url") if owner_creator else None,
         })
+
+    def handle_mark_content_unlocked(self):
+        """広告視聴フローを完走してコンテンツがアンロックされたタイミングで、視聴ページの
+        JS(onAdFinished())から呼ばれる。ポイント付与の判定基準となるview_countは
+        ここでのみ加算する(/resolve-videoでのロック画面表示時ではなく)。
+
+        mediaTokenは/resolve-videoを経由しないと入手できないため、この時点で
+        視聴ページを一度も開かずにこのAPIだけを機械的に叩くことはできない。
+        IPを変えての水増し自体を完全に防げるわけではないが、最低でも
+        (広告の実配信リクエストが飛ぶ)投稿ページを毎回きちんと開く必要があるところまで
+        ハードルを上げる。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 1_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        video_id = data.get("id")
+        token = data.get("token")
+        if not isinstance(video_id, str) or not verify_media_token(video_id, token):
+            self.respond_json(403, {"ok": False, "error": "invalid_token"})
+            return
+
+        # 他サイトへの埋め込み等からの機械的な呼び出しで水増しされないよう、
+        # /resolve-videoの閲覧数カウントと同じ基準でこのサイト自身からの
+        # リクエストかを確認する(レスポンス自体はどちらでも同じものを返す)。
+        if is_same_site_referer(self):
+            with VIDEOS_LOCK:
+                videos_list = load_videos()
+                video = next((v for v in videos_list if v["id"] == video_id), None)
+                if video and should_count_view(video_id, get_client_ip(self)):
+                    video["view_count"] = video.get("view_count", 0) + 1
+                    save_videos(videos_list)
+
+        self.respond_json(200, {"ok": True})
 
     def handle_serve_video(self, video_id, query):
         token = (query.get("token") or [None])[0]
@@ -2218,6 +2258,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_reset_og_image()
+        elif path == "/api/mark-content-unlocked":
+            # 公開・ログイン不要(視聴ページから、広告視聴フロー完走時に呼ばれる)
+            self.handle_mark_content_unlocked()
         elif path == "/api/dmca-report":
             # 公開・ログイン不要(/copyright-policyのフォームから誰でも送信できる)
             self.handle_dmca_report()

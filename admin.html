@@ -1947,6 +1947,9 @@
       badgeRow.appendChild(badge);
     }
 
+    if (video.suspended) {
+      addBadge('🚫 非公開中(モデレーション)', 'bg-rose-100 text-rose-700');
+    }
     if (video.contentType === 'image') {
       addBadge('画像ギャラリー（' + (video.imageCount || 0) + '枚）', 'bg-violet-50 text-violet-700');
     }
@@ -2075,6 +2078,42 @@
     body.appendChild(buildVideoCtaTextSection(video));
     body.appendChild(buildVideoAdsSection(video));
     body.appendChild(buildVideoThumbnailSection(video));
+
+    const suspendBtn = document.createElement('button');
+    suspendBtn.type = 'button';
+    suspendBtn.textContent = video.suspended ? '再公開する' : '非公開にする';
+    suspendBtn.className = video.suspended
+      ? 'self-start text-xs font-medium text-teal-600 hover:text-teal-700 mt-1'
+      : 'self-start text-xs font-medium text-amber-600 hover:text-amber-700 mt-1';
+    suspendBtn.addEventListener('click', () => {
+      const nextSuspended = !video.suspended;
+      if (nextSuspended && !window.confirm(
+        'この動画を非公開にしますか？\n'
+        + '一覧・共有リンクの両方から即座に見えなくなります(ファイル自体は削除されません。後で再公開できます)。'
+      )) return;
+
+      suspendBtn.disabled = true;
+      fetch('/api/videos/set-suspended', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: video.id, suspended: nextSuspended }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshVideoList();
+          } else {
+            suspendBtn.disabled = false;
+            alert('更新に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          suspendBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    body.appendChild(suspendBtn);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';

@@ -1660,6 +1660,7 @@ class Handler(BaseHTTPRequestHandler):
                     "viewCount": v.get("view_count", 0),
                     "rawViewCount": v.get("raw_view_count", 0),
                     "hasCustomThumbnail": bool(v.get("og_image_filename")),
+                    "suspended": bool(v.get("suspended")),
                     "statsToken": get_stats_token(v, videos),
                     "contentType": v.get("content_type", "video"),
                     "imageCount": len(v.get("image_filenames") or []) if v.get("content_type") == "image" else None,
@@ -1695,9 +1696,10 @@ class Handler(BaseHTTPRequestHandler):
         with VIDEOS_LOCK:
             videos_list = load_videos()
             video = next((v for v in videos_list if v["id"] == requested_id), None)
-            if not video or not video_file_path(video):
-                # 削除済み・存在しないIDへのアクセスは「期限切れ」と同じ画面に統一する。
-                # (手動削除なのか自然に24時間経過したのかを外部から区別させないため)
+            if not video or not video_file_path(video) or video.get("suspended"):
+                # 削除済み・存在しないID・管理者が一時非公開にしたIDへのアクセスは
+                # すべて「期限切れ」と同じ画面に統一する(手動削除/自然な期限切れ/
+                # モデレーションによる非公開のどれなのかを外部から区別させないため)。
                 self.respond_json(200, {"expired": True})
                 return
 
@@ -1804,7 +1806,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404, "Video not found")
                 return
             path = video_file_path(video) if video else None
-            if not path:
+            if not path or video.get("suspended"):
                 self.send_error(404, "Video not found")
                 return
 
@@ -1887,7 +1889,7 @@ class Handler(BaseHTTPRequestHandler):
         with VIDEOS_LOCK:
             videos_list = load_videos()
             video = next((v for v in videos_list if v["id"] == video_id), None)
-            if not video or video.get("content_type") != "image":
+            if not video or video.get("content_type") != "image" or video.get("suspended"):
                 self.send_error(404, "Not Found")
                 return
 
@@ -1938,7 +1940,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_serve_thumbnail(self, video_id):
         video = find_video(video_id)
-        filename = video.get("og_image_filename") if video else None
+        filename = video.get("og_image_filename") if video and not video.get("suspended") else None
         if not filename:
             self.send_error(404, "Not Found")
             return
@@ -2027,6 +2029,7 @@ class Handler(BaseHTTPRequestHandler):
             and video_file_path(v)
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
+            and not v.get("suspended")
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -2044,8 +2047,9 @@ class Handler(BaseHTTPRequestHandler):
     def handle_api_all_posts(self):
         """サイト全体で現在アクセス可能な投稿のURL一覧を返す(公開・認証不要)。
 
-        削除済み(実体ファイルが無い)・24時間限定で期限切れの投稿は除外する。
-        どのページからもリンクしていない(このURLを直接知っている人だけが使う)想定。
+        削除済み(実体ファイルが無い)・24時間限定で期限切れ・管理者が一時非公開に
+        した投稿は除外する。どのページからもリンクしていない(このURLを直接
+        知っている人だけが使う)想定。
         """
         creators = load_creators()
         videos_list = load_videos()
@@ -2053,6 +2057,7 @@ class Handler(BaseHTTPRequestHandler):
             v for v in videos_list
             if video_file_path(v)
             and not get_time_limit_status(v)["expired"]
+            and not v.get("suspended")
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -2081,7 +2086,8 @@ class Handler(BaseHTTPRequestHandler):
 
         現時点ではTOPページ(/)自体がまだ管理者プレビュー段階(noindex)のため実質参照
         されないが、一般公開する段になってすぐ使えるよう先に用意しておく。掲載するのは
-        現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・期限切れ・unlistedは除外)。
+        現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・期限切れ・unlisted・
+        管理者による一時非公開は除外)。
         """
         videos_list = load_videos()
         items = [
@@ -2089,6 +2095,7 @@ class Handler(BaseHTTPRequestHandler):
             if video_file_path(v)
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
+            and not v.get("suspended")
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -2153,6 +2160,7 @@ class Handler(BaseHTTPRequestHandler):
             if video_file_path(v)
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
+            and not v.get("suspended")
         ]
 
         serialized = [
@@ -2245,6 +2253,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_delete_video()
+        elif path == "/api/videos/set-suspended":
+            if self.require_auth():
+                return
+            self.handle_set_video_suspended()
         elif path == "/api/videos/set-ads":
             if self.require_auth():
                 return
@@ -3081,6 +3093,38 @@ class Handler(BaseHTTPRequestHandler):
 
         self._delete_video_entry(video_id, video)
         self.respond_json(200, {"ok": True})
+
+    def handle_set_video_suspended(self):
+        """管理者が投稿を一時非公開(モデレーション用)にする/解除する。
+
+        削除(handle_delete_video)と違い、実体ファイル・データは一切消さない。
+        投稿直後に問題に気づいた場合等、まず即座に見えなくして後で中身を確認し、
+        「問題無し→解除」「アウト→削除」を判断できるようにするための機能。
+        非公開中は一覧(TOP/投稿者ページ/サイトマップ)から消えるだけでなく、
+        共有リンク(/?v=<id>)自体も期限切れと同じ画面になり、動画・画像の実体
+        (/video/・/image/)にも一切アクセスできなくなる。
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        video_id = data.get("id")
+        with VIDEOS_LOCK:
+            videos_list = load_videos()
+            video = next((v for v in videos_list if v["id"] == video_id), None)
+            if not video:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+            video["suspended"] = bool(data.get("suspended"))
+            save_videos(videos_list)
+
+        self.respond_json(200, {"ok": True, "suspended": video["suspended"]})
 
     def handle_creator_delete_content(self):
         creator_id = self.get_creator_id()

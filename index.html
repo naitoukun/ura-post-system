@@ -29,9 +29,13 @@
 <meta name="twitter:description" content="広告視聴でコンテンツをアンロック">
 <meta name="twitter:image" content="{{OG_IMAGE_URL}}">
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
+<!-- onerrorは広告ブロッカー検出用。スクリプト自体の読み込みがブロックされたかどうかを
+     window直下のフラグに記録しておき、後で本編スクリプト側から参照する
+     (この時点ではまだ本編<script>が実行されていないため、後付けのaddEventListener('error')
+     だと同期読み込みスクリプトの失敗を取りこぼすので、要素のonerror属性で確実に拾う)。 -->
+<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js" onerror="window.__imaScriptBlocked = true;"></script>
 <!-- アンロック後の視聴ページ(動画・画像共通)に表示するバナー広告用(ExoClick AdProvider) -->
-<script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
+<script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js" onerror="window.__adProviderScriptBlocked = true;"></script>
 <!-- アクセス解析(GoatCounter)。投稿閲覧ページのみに設置 -->
 <script data-goatcounter="https://ura-post.goatcounter.com/count"
         async src="//gc.zgo.at/count.js"></script>
@@ -308,6 +312,20 @@
          「読み込み中…」表示の上に重なって見えるようにする
          (動画広告はLOADEDイベントで明示的にadLoadingStateを隠す)。 -->
     <div id="adContainerEl" class="absolute inset-0"></div>
+
+    <!-- 広告ブロッカーが検出された場合のみ表示する案内。単なる広告在庫切れ(no-fill)とは
+         区別し、ブロッカーが原因の場合は無料開放せずここで止める(でないと広告収益の
+         元になる「広告視聴」が誰でも無条件でスキップできてしまうため)。 -->
+    <div id="adBlockNotice" class="hidden-el absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/85 px-5 text-center">
+      <p class="text-sm font-bold text-white">広告ブロッカーが検出されました</p>
+      <p class="text-xs text-slate-300 leading-relaxed">
+        当サイトは広告視聴によって無料で運営されています。<br>
+        お手数ですが広告ブロッカーを無効にしてから再読み込みしてください。
+      </p>
+      <button id="adBlockReloadBtn" type="button" class="btn-primary rounded-lg px-5 py-2.5 text-sm font-bold">
+        再読み込み
+      </button>
+    </div>
   </div>
 
   <!-- 動画広告再生中(オーバーレイが出ている間)だけ表示するバナー広告。視聴者が
@@ -350,6 +368,8 @@
   const adContentEl   = document.getElementById('adContentEl');
   const adContainerEl = document.getElementById('adContainerEl');
   const adLoadingState= document.getElementById('adLoadingState');
+  const adBlockNotice = document.getElementById('adBlockNotice');
+  const adBlockReloadBtn = document.getElementById('adBlockReloadBtn');
   const ageGateOverlay= document.getElementById('ageGateOverlay');
   const ageGateYes    = document.getElementById('ageGateYes');
   const ageGateNo     = document.getElementById('ageGateNo');
@@ -402,6 +422,50 @@
   // 管理画面(/admin)で広告A/Bが設定されていない場合のフォールバック（1本だけ・100%表示）
   const FALLBACK_ADS = [{ id: 'fallback', label: 'デフォルト広告', adCode: '', weight: 100 }];
 
+  // GA4へのイベント送信。今まではページビューしか送っておらず、CTAのクリック率や
+  // アンロック完了率が計測できていなかった。gtag()はhead側で同期的に定義済みなので、
+  // 実ライブラリの読み込み前でもdataLayerにキューイングされ、後から反映される。
+  function track(eventName, params) {
+    if (typeof gtag === 'function') {
+      gtag('event', eventName, Object.assign({ content_id: requestedVideoId || undefined }, params || {}));
+    }
+  }
+
+  // 広告ブロッカー検出。「広告ネットワーク側の単純な在庫切れ(no-fill)」と誤判定して
+  // 一般ユーザーを締め出さないよう、なるべく確度の高い信号だけを見る。
+  // - おとり要素: 広告ブロッカーの定番の非表示対象クラス名を持つ要素を仕込んでおき、
+  //   CSSで強制的に隠されていないかを見る(uBlock Origin/AdBlock Plus等の
+  //   コスメティックフィルタで広く使われている定番の検出手法)。
+  // - 広告スクリプト自体の読み込み失敗(head側のonerrorで記録済み)。
+  // どちらか一方でも真であれば「ブロッカーが原因」と判断する。
+  let adBlockBaitBlocked = false;
+  (function detectAdBlockBait() {
+    const bait = document.createElement('div');
+    bait.className = 'ad ads ad-banner adsbox adsbygoogle pub_300x250';
+    bait.style.cssText = 'position:absolute; left:-9999px; top:-9999px; width:1px; height:1px;';
+    document.body.appendChild(bait);
+    setTimeout(() => {
+      const stillInDom = document.body.contains(bait);
+      adBlockBaitBlocked = !stillInDom
+        || bait.offsetParent === null
+        || bait.offsetHeight === 0
+        || getComputedStyle(bait).display === 'none';
+      if (stillInDom) bait.remove();
+    }, 200);
+  })();
+
+  function isAdBlockLikely() {
+    return Boolean(adBlockBaitBlocked || window.__imaScriptBlocked || window.__adProviderScriptBlocked);
+  }
+
+  function showAdBlockNotice() {
+    track('adblock_detected');
+    adLoadingState.classList.add('hidden-el');
+    adBlockNotice.classList.remove('hidden-el');
+  }
+
+  adBlockReloadBtn.addEventListener('click', () => location.reload());
+
   // 広告A/B設定（この動画専用の個別設定 or サイト全体の既定設定）。
   // /resolve-video の取得が完了するまではフォールバックを使う
   let siteAds = FALLBACK_ADS;
@@ -444,10 +508,14 @@
     if (info.ownerCreatorId) {
       postListBtn.classList.remove('hidden-el');
       postListBtn.addEventListener('click', () => {
+        track('post_list_click', { owner_creator_id: info.ownerCreatorId });
         location.href = '/creator-posts/' + encodeURIComponent(info.ownerCreatorId);
       });
     }
   });
+
+  premiumLink.addEventListener('click', () => track('premium_link_click'));
+  interestedBtn.addEventListener('click', () => track('interested_click'));
 
   // 24時間限定の残り時間を1秒ごとに更新表示する。0になったら「期限切れ」画面に切り替える。
   function startCountdown(expiresAtEpoch) {
@@ -477,7 +545,10 @@
     const intervalId = setInterval(tick, 1000);
   }
 
-  unlockBtn.addEventListener('click', startAdSimulation);
+  unlockBtn.addEventListener('click', () => {
+    track('unlock_click');
+    startAdSimulation();
+  });
 
   // Google IMA SDK (VASTタグを再生する業界標準のSDK) 関連。
   // 一度だけ作っておき、視聴のたびにrequestAds()し直す。
@@ -522,7 +593,20 @@
   function onAdError() {
     if (adsManager) adsManager.destroy();
     // VASTタグがエラー/フィル無しだった場合は、視聴者を待たせすぎずそのままアンロックする
-    setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
+    // (ただし広告ブロッカーが原因の可能性が高い場合はhandleNoAdAvailable内で弾く)
+    setTimeout(handleNoAdAvailable, NO_AD_FALLBACK_WAIT_MS);
+  }
+
+  // 広告が出せなかった場合の共通の分岐先。広告ブロッカーが原因らしい場合は
+  // 無料開放せずhandleNoAdAvailable内で足止めし、そうでなければ(=純粋な在庫切れ等)
+  // 今まで通り視聴者を待たせすぎずアンロックする。
+  function handleNoAdAvailable() {
+    if (adFinishedCalled) return;
+    if (isAdBlockLikely()) {
+      showAdBlockNotice();
+      return;
+    }
+    onAdFinished();
   }
 
   // 動画広告再生中のオーバーレイに表示するバナー広告。視聴ページのバナーと同じ方式
@@ -553,6 +637,7 @@
     adFinishedCalled = false;
     overlay.classList.remove('hidden-el');
     selectedAdDebug.textContent = '';
+    adBlockNotice.classList.add('hidden-el');
     adPageBannerWrap.classList.add('hidden-el');
     loadAdPageBanner();
 
@@ -564,14 +649,15 @@
     adLoadingState.classList.remove('hidden-el');
 
     if (!selectedAd.adCode || typeof google === 'undefined' || !google.ima) {
-      // 広告コード未設定、またはSDKが読み込めていない場合はそのままアンロックする
-      setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
+      // 広告コード未設定、またはSDKが読み込めていない場合の分岐
+      // (SDK自体が読み込めていない場合、広告ブロッカーが原因であることが多い)
+      setTimeout(handleNoAdAvailable, NO_AD_FALLBACK_WAIT_MS);
       return;
     }
 
     setUpIma();
     if (!adsLoader) {
-      setTimeout(onAdFinished, NO_AD_FALLBACK_WAIT_MS);
+      setTimeout(handleNoAdAvailable, NO_AD_FALLBACK_WAIT_MS);
       return;
     }
 
@@ -589,8 +675,9 @@
     adsLoader.requestAds(adsRequest);
     // 広告ネットワークからの応答自体が来ずADS_MANAGER_LOADED/AD_ERRORのどちらも
     // 発火しない場合に、視聴者を無期限に待たせないための絶対的な上限。
-    // onAdFinished()は多重呼び出し防止済みなので、正常に広告が終わっていれば何もしない。
-    setTimeout(onAdFinished, MAX_AD_WAIT_MS);
+    // handleNoAdAvailable()内でadFinishedCalledを見ているので、正常に広告が
+    // 終わっていれば何もしない。
+    setTimeout(handleNoAdAvailable, MAX_AD_WAIT_MS);
   }
 
   function onAdFinished() {
@@ -603,6 +690,8 @@
     stopTeaserPreview();
 
     videoInfoPromise.then((info) => {
+      track('content_unlocked', { content_type: info.contentType });
+
       // 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンID・タグが異なるため、
       // 判定した方の<ins>だけを生成する(両方は作らない=片方だけに広告リクエストを飛ばす)。
       const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;

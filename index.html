@@ -531,6 +531,9 @@
     fetch('/site-config', { cache: 'no-store' })
       .then((res) => res.json())
       .then((info) => {
+        // /site-config取得中に広告再生が終わってオーバーレイが閉じている場合は、
+        // 見えない広告に無駄なリクエストを飛ばさないよう何もしない。
+        if (adFinishedCalled) return;
         const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
         const zoneId = isDesktopAd ? info.adPageBannerZoneIdDesktop : info.adPageBannerZoneIdMobile;
         if (!zoneId) return;

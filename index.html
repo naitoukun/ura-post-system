@@ -236,6 +236,11 @@
       autoplay
       playsinline
     ></video>
+    <!-- 動画ファイル自体の読み込み失敗(実体ファイル欠損・破損・ネットワーク不調等)を
+         無言のまま(真っ黒な再生バーだけ)にしないための保険。広告自体の失敗とは別経路。 -->
+    <p id="mainVideoErrorMsg" class="hidden-el text-sm text-rose-500 text-center">
+      動画の読み込みに失敗しました。時間をおいて再度お試しいただくか、リンクの発行者にお問い合わせください。
+    </p>
 
     <div id="imageGallery" class="hidden-el w-full flex flex-col gap-3"></div>
 
@@ -323,6 +328,7 @@
   const unlockedArea= document.getElementById('unlockedArea');
   const overlay     = document.getElementById('overlay');
   const mainVideo   = document.getElementById('mainVideo');
+  const mainVideoErrorMsg = document.getElementById('mainVideoErrorMsg');
   const imageGallery= document.getElementById('imageGallery');
   const premiumLink = document.getElementById('premiumLink');
   const interestedBtn = document.getElementById('interestedBtn');
@@ -600,6 +606,11 @@
         }
         return;
       }
+
+      mainVideoErrorMsg.classList.add('hidden-el');
+      mainVideo.addEventListener('error', () => {
+        mainVideoErrorMsg.classList.remove('hidden-el');
+      }, { once: true });
 
       mainVideo.src = info.url;
       mainVideo.play().catch(() => {

@@ -855,6 +855,38 @@ def find_video(video_id):
     return None
 
 
+# 動画/画像の実体を返す/video/・/image/への署名付き一時トークン。
+# 目的は「投稿ページ(/resolve-video)を一度も経由せずにURLだけを使い回されたり、
+# 抜き出したURLを他サイトに直リンクされ続けたりするのを防ぐ」ことであり、
+# 正規に視聴している人の再生・シークを妨げないよう有効期限は長めに取っている。
+URL_SIGNING_SECRET = secrets.token_bytes(32)
+MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60  # 6時間
+
+
+def generate_media_token(video_id):
+    expires_at = int(time.time()) + MEDIA_TOKEN_TTL_SECONDS
+    signature = hmac.new(
+        URL_SIGNING_SECRET, f"{video_id}:{expires_at}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"{expires_at}.{signature}"
+
+
+def verify_media_token(video_id, token):
+    if not token or "." not in token:
+        return False
+    expires_str, _, signature = token.partition(".")
+    try:
+        expires_at = int(expires_str)
+    except ValueError:
+        return False
+    if time.time() > expires_at:
+        return False
+    expected = hmac.new(
+        URL_SIGNING_SECRET, f"{video_id}:{expires_at}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
 def video_file_path(video):
     """コンテンツの実体ファイルの存在確認用。画像ギャラリーの場合は1枚目で代表させる。"""
     if video.get("content_type") == "image":
@@ -1544,9 +1576,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/resolve-video":
             self.handle_resolve_video(parse_qs(split.query))
         elif path.startswith("/video/"):
-            self.handle_serve_video(path[len("/video/"):])
+            self.handle_serve_video(path[len("/video/"):], parse_qs(split.query))
         elif path.startswith("/image/"):
-            self.handle_serve_image(path[len("/image/"):])
+            self.handle_serve_image(path[len("/image/"):], parse_qs(split.query))
         elif path == "/site-config":
             self.handle_site_config()
         elif path.startswith("/join/"):
@@ -1699,6 +1731,7 @@ class Handler(BaseHTTPRequestHandler):
             "id": video["id"],
             "contentType": content_type,
             "imageCount": len(video.get("image_filenames") or []) if content_type == "image" else None,
+            "mediaToken": generate_media_token(video["id"]),
             "uploadedAt": video["uploaded_at"],
             "ads": [serialize_ad(ad) for ad in effective_ads],
             "timeLimit": get_time_limit_status(video),
@@ -1710,7 +1743,14 @@ class Handler(BaseHTTPRequestHandler):
             "contactUrl": owner_creator.get("contact_url") if owner_creator else None,
         })
 
-    def handle_serve_video(self, video_id):
+    def handle_serve_video(self, video_id, query):
+        token = (query.get("token") or [None])[0]
+        if not verify_media_token(video_id, token):
+            # 投稿ページ(/resolve-video)を経由せずURLだけを直接叩かれた/
+            # 抜き出したURLが期限切れになった場合はここで弾く
+            self.send_error(403, "Forbidden")
+            return
+
         with VIDEOS_LOCK:
             videos_list = load_videos()
             video = next((v for v in videos_list if v["id"] == video_id), None)
@@ -1782,7 +1822,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
 
-    def handle_serve_image(self, path_suffix):
+    def handle_serve_image(self, path_suffix, query):
         parts = path_suffix.split("/", 1)
         if len(parts) != 2:
             self.send_error(404, "Not Found")
@@ -1792,6 +1832,11 @@ class Handler(BaseHTTPRequestHandler):
             index = int(index_str)
         except ValueError:
             self.send_error(404, "Not Found")
+            return
+
+        token = (query.get("token") or [None])[0]
+        if not verify_media_token(video_id, token):
+            self.send_error(403, "Forbidden")
             return
 
         with VIDEOS_LOCK:

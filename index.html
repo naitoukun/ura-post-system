@@ -624,7 +624,7 @@
         const count = info.imageCount || 0;
         for (let i = 0; i < count; i++) {
           const img = document.createElement('img');
-          const src = '/image/' + encodeURIComponent(info.id) + '/' + i;
+          const src = '/image/' + encodeURIComponent(info.id) + '/' + i + '?token=' + encodeURIComponent(info.mediaToken);
           img.src = src;
           img.className = 'card w-full rounded-2xl cursor-zoom-in no-save';
           img.loading = 'lazy';
@@ -668,7 +668,8 @@
           id: status.id,
           contentType: status.contentType || 'video',
           imageCount: status.imageCount,
-          url: '/video/' + status.id,
+          mediaToken: status.mediaToken,
+          url: '/video/' + status.id + '?token=' + encodeURIComponent(status.mediaToken),
           ads: status.ads,
           timeLimit: status.timeLimit,
           premiumLink: status.premiumLink,
@@ -712,7 +713,7 @@
   }
 
   function startImageMosaicPreview(info) {
-    teaserImage.src = '/image/' + encodeURIComponent(info.id) + '/0';
+    teaserImage.src = '/image/' + encodeURIComponent(info.id) + '/0?token=' + encodeURIComponent(info.mediaToken);
     syncCanvasSize();
     window.addEventListener('resize', syncCanvasSizeAndRedrawImage);
     if (teaserImage.complete && teaserImage.naturalWidth) {

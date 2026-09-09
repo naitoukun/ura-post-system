@@ -8,6 +8,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="6a97888e-site-verification" content="c9e31b33bb13176de7f01e146423e5b6">
 <title>ura-post.com</title>
+<!-- 検索結果のスニペット用。共有リンク(?v=<id>)経由なら投稿者名入りの文言に、
+     無ければ既定の説明文にサーバー側で差し替える(handle_serve_unlock_page参照)。 -->
+<meta name="description" content="{{META_DESCRIPTION}}">
 <!-- アクセス解析(GA/GoatCounter)で投稿ごとに集計できるようにするための保険。
      このサイトはSPAで全投稿が同じ"/"を返す(?v=だけが違う)ため、タイトルが常に固定だと
      アクセス解析側で全投稿が1行にまとまってしまう。GAの自動pageview発火より前に、
@@ -22,11 +25,11 @@
      (動画ごとの個別サムネイルが無ければサイト共通のブランド画像のまま) -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="ura-post.com">
-<meta property="og:description" content="広告視聴でコンテンツをアンロック">
+<meta property="og:description" content="{{META_DESCRIPTION}}">
 <meta property="og:image" content="{{OG_IMAGE_URL}}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ura-post.com">
-<meta name="twitter:description" content="広告視聴でコンテンツをアンロック">
+<meta name="twitter:description" content="{{META_DESCRIPTION}}">
 <meta name="twitter:image" content="{{OG_IMAGE_URL}}">
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- onerrorは広告ブロッカー検出用。スクリプト自体の読み込みがブロックされたかどうかを

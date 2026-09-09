@@ -427,6 +427,11 @@ def send_notification_email(subject, body):
 # 動画ごとに first_accessed_at (初回アクセス時刻) を記録し、そこから24時間で期限切れにする。
 TIME_LIMIT_SECONDS = 24 * 60 * 60
 
+# 検索結果のスニペット用。index.html自体の<meta name="description">には汎用の
+# 説明文を静的に置いておき、共有リンク(?v=<id>)経由のアクセスだけ投稿者名入りの
+# 文言に差し替える(handle_serve_unlock_page参照)。
+DEFAULT_META_DESCRIPTION = "Xで活動する女の子を応援するサイト。限定画像・動画を広告視聴で無料アンロック。"
+
 DEFAULT_PREMIUM_LINK = "https://fantia.jp/"
 DEFAULT_PREMIUM_BUTTON_TEXT = "【ファン限定】Fantia特設ページへ"
 MAX_BUTTON_TEXT_LENGTH = 60
@@ -2119,8 +2124,12 @@ class Handler(BaseHTTPRequestHandler):
         一緒に返す。呼ばれるたびに毎回抽選し直すので、特定の投稿が固定で埋もれ続けることはない。
 
         投稿数が増えても1回のレスポンスが肥大化しないよう、?offset=&limit=でページングする。
-        pickupは初回(offset=0)のレスポンスにのみ含める(2ページ目以降で重複して抽選し直す
-        意味が無いため)。
+        pickupは初回(offset=0)かつ検索条件が無いレスポンスにのみ含める(検索結果と
+        ランダムピックアップが混ざると分かりにくいうえ、2ページ目以降で重複して
+        抽選し直す意味も無いため)。
+
+        ?q=<投稿者名の部分一致(大文字小文字を区別しない)>、?contentType=video|image で
+        絞り込める(タグ等の分類は無いため、今のデータで実現できる範囲のみ)。
         """
         try:
             offset = max(0, int((query.get("offset") or ["0"])[0]))
@@ -2131,6 +2140,11 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             limit = TOP_POSTS_PAGE_SIZE
         limit = max(1, min(limit, MAX_TOP_POSTS_PAGE_SIZE))
+        search_query = (query.get("q") or [""])[0].strip()[:100]
+        content_type_filter = (query.get("contentType") or [""])[0]
+        if content_type_filter not in ("video", "image"):
+            content_type_filter = None
+        is_filtered = bool(search_query or content_type_filter)
 
         creators = load_creators()
         videos_list = load_videos()
@@ -2157,7 +2171,17 @@ class Handler(BaseHTTPRequestHandler):
             for v in items
         ]
 
-        pickup = random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT)) if offset == 0 else None
+        if content_type_filter:
+            serialized = [x for x in serialized if x["contentType"] == content_type_filter]
+        if search_query:
+            q_lower = search_query.lower()
+            serialized = [x for x in serialized if q_lower in (x["creatorDisplayName"] or "").lower()]
+
+        pickup = (
+            random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT))
+            if offset == 0 and not is_filtered
+            else None
+        )
         serialized.sort(key=lambda x: x["uploadedAt"] or "", reverse=True)
 
         page = serialized[offset:offset + limit]
@@ -2170,25 +2194,36 @@ class Handler(BaseHTTPRequestHandler):
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。
 
-        OGP画像は、共有リンク(?v=<id>)が指している動画に個別サムネイルが
-        設定されていればそれを、無ければサイト共通の既定画像を差し込む。
-        SNSのクローラーはJSを実行しないため、この差し込みはHTMLを返す
-        このタイミングでサーバー側にやっておく必要がある。
+        OGP画像・meta descriptionは、共有リンク(?v=<id>)が指している動画の情報が
+        あればそれを反映し、無ければサイト共通の既定値を差し込む。SNSのクローラーや
+        検索エンジンはJSを実行しないため、この差し込みはHTMLを返すこのタイミングで
+        サーバー側にやっておく必要がある。
         """
+        # ローカル変数名は"html"にしない(組み込みのhtmlモジュール(html.escape等)を
+        # シャドーイングしてしまうため。他のテンプレート差し込み箇所と同じ命名規則)。
         with open(os.path.join(BASE_DIR, "index.html"), "r", encoding="utf-8") as f:
-            html = f.read()
+            page_html = f.read()
 
         requested_id = (query.get("v") or [None])[0]
         image_url = PUBLIC_SITE_URL + "/og-image"
+        description = DEFAULT_META_DESCRIPTION
         if requested_id:
             video = find_video(requested_id)
-            if video and video.get("og_image_filename"):
-                thumb_path = os.path.join(UPLOAD_DIR, video["og_image_filename"])
-                if os.path.exists(thumb_path):
-                    image_url = PUBLIC_SITE_URL + "/thumb/" + requested_id
+            if video:
+                if video.get("og_image_filename"):
+                    thumb_path = os.path.join(UPLOAD_DIR, video["og_image_filename"])
+                    if os.path.exists(thumb_path):
+                        image_url = PUBLIC_SITE_URL + "/thumb/" + requested_id
+                owner_creator = (
+                    find_creator(load_creators(), video.get("owner_creator_id"))
+                    if video.get("owner_creator_id") else None
+                )
+                if owner_creator and owner_creator.get("display_name"):
+                    description = owner_creator["display_name"] + "さんの投稿。" + DEFAULT_META_DESCRIPTION
 
-        html = html.replace("{{OG_IMAGE_URL}}", image_url)
-        body = html.encode("utf-8")
+        page_html = page_html.replace("{{OG_IMAGE_URL}}", image_url)
+        page_html = page_html.replace("{{META_DESCRIPTION}}", html.escape(description))
+        body = page_html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

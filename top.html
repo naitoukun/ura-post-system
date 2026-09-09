@@ -53,6 +53,15 @@
   .brand-accent{
     color:var(--accent-teal-dark);
   }
+  .type-filter-btn{
+    border-color:var(--accent-teal);
+    color:var(--accent-teal-dark);
+    background:#ffffff;
+  }
+  .type-filter-btn.active{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+  }
 </style>
 </head>
 <body class="min-h-screen w-full p-4" style="background:var(--bg-page);">
@@ -85,13 +94,31 @@
        <ins>だけを生成する(index.htmlと同じ方式)。 -->
   <div id="topAdWrap" class="hidden-el w-full"></div>
 
+  <!-- 検索・絞り込み。タグ等の分類データは無いため、投稿者名の部分一致検索と
+       種別(動画/画像)の絞り込みのみ。検索中はピックアップ枠を一旦隠す(結果と
+       混ざると分かりにくいため)。 -->
+  <div class="card rounded-2xl p-3 flex flex-col gap-2">
+    <input
+      id="searchInput"
+      type="search"
+      inputmode="search"
+      placeholder="🔍 投稿者名で検索"
+      class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+    >
+    <div class="flex gap-2">
+      <button type="button" data-type="" class="type-filter-btn flex-1 rounded-lg py-1.5 text-xs font-bold border">すべて</button>
+      <button type="button" data-type="video" class="type-filter-btn flex-1 rounded-lg py-1.5 text-xs font-bold border">動画</button>
+      <button type="button" data-type="image" class="type-filter-btn flex-1 rounded-lg py-1.5 text-xs font-bold border">画像</button>
+    </div>
+  </div>
+
   <!-- 埋もれ対策: 新着順とは別に、無作為に選んだ投稿を毎回出す枠(古い投稿にも光を当てる) -->
   <div id="pickupSection" class="hidden-el flex flex-col gap-2">
     <p class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">💎 ピックアップ 💎</p>
     <div id="pickupGrid" class="grid grid-cols-3 gap-2"></div>
   </div>
 
-  <p class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
+  <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
 
   <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
   <div id="emptyText" class="hidden-el text-sm text-slate-400">投稿が見つかりませんでした。</div>
@@ -135,6 +162,9 @@
   const pickupGrid = document.getElementById('pickupGrid');
   const loadMoreSentinel = document.getElementById('loadMoreSentinel');
   const topAdWrap = document.getElementById('topAdWrap');
+  const feedHeading = document.getElementById('feedHeading');
+  const searchInput = document.getElementById('searchInput');
+  const typeFilterBtns = Array.from(document.querySelectorAll('.type-filter-btn'));
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
   const PAGE_SIZE = 20;
 
@@ -230,13 +260,24 @@
   let offset = 0;
   let hasMore = true;
   let isLoading = false;
+  // 検索・絞り込み状態。タグ等の分類データが無いため、投稿者名の部分一致と
+  // 種別(動画/画像)のみ。
+  let searchQuery = '';
+  let contentTypeFilter = '';
+
+  function buildQueryString() {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
+    if (searchQuery) params.set('q', searchQuery);
+    if (contentTypeFilter) params.set('contentType', contentTypeFilter);
+    return params.toString();
+  }
 
   function loadNextPage() {
     if (isLoading || !hasMore) return;
     isLoading = true;
     loadMoreSentinel.classList.remove('hidden-el');
 
-    fetch('/api/top-posts?offset=' + offset + '&limit=' + PAGE_SIZE, { cache: 'no-store' })
+    fetch('/api/top-posts?' + buildQueryString(), { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         loadingText.classList.add('hidden-el');
@@ -278,6 +319,45 @@
     if (entries.some((e) => e.isIntersecting)) loadNextPage();
   });
   observer.observe(loadMoreSentinel);
+
+  // 検索語・種別のどちらかが変わったら、一覧を最初からやり直す。
+  function resetAndReload() {
+    const isFiltered = Boolean(searchQuery || contentTypeFilter);
+
+    offset = 0;
+    hasMore = true;
+    isLoading = false;
+    postsGrid.innerHTML = '';
+    pickupGrid.innerHTML = '';
+    // 検索結果とランダムピックアップが混ざると分かりにくいため、絞り込み中は隠す
+    // (サーバー側も絞り込み中はpickupを返さない)。
+    pickupSection.classList.toggle('hidden-el', isFiltered);
+    emptyText.classList.add('hidden-el');
+    loadingText.classList.remove('hidden-el');
+    feedHeading.textContent = isFiltered ? '🔍 検索結果 🔍' : '🆕 新着 🆕';
+
+    observer.observe(loadMoreSentinel); // disconnect()済みでも再度呼べば復帰する
+    loadNextPage();
+  }
+
+  let searchDebounceId = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounceId);
+    searchDebounceId = setTimeout(() => {
+      searchQuery = searchInput.value.trim();
+      resetAndReload();
+    }, 300);
+  });
+
+  typeFilterBtns.forEach((btn) => {
+    if (btn.dataset.type === contentTypeFilter) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      if (btn.dataset.type === contentTypeFilter) return;
+      contentTypeFilter = btn.dataset.type;
+      typeFilterBtns.forEach((b) => b.classList.toggle('active', b === btn));
+      resetAndReload();
+    });
+  });
 
   loadNextPage();
 })();

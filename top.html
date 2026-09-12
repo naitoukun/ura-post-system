@@ -314,24 +314,20 @@
     return card;
   }
 
-  // 視聴ページ(index.html)と同じバナー広告。PC/スマホでゾーンID・タグが異なるため、
-  // 判定した方の<ins>だけを生成する。
+  // 視聴ページ(index.html)と同じく、スクロールに追従するSticky Banner/Mobile Instant
+  // Messageのゾーンを使う(収益重視の判断)。投稿者一覧ページ(creator-posts.html)は
+  // 非固定のBanner/Mobile Bannerのままなので、共通設定(contentPageAdZoneId*)は使わず
+  // このゾーンだけ直接指定している。
   function loadTopAd() {
-    fetch('/site-config', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((info) => {
-        const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
-        const zoneId = isDesktopAd ? info.contentPageAdZoneIdDesktop : info.contentPageAdZoneIdMobile;
-        if (!zoneId) return;
-        const ins = document.createElement('ins');
-        ins.className = isDesktopAd ? 'eas6a97888e2' : 'eas6a97888e10';
-        ins.setAttribute('data-zoneid', zoneId);
-        topAdWrap.innerHTML = '';
-        topAdWrap.appendChild(ins);
-        topAdWrap.classList.remove('hidden-el');
-        (window.AdProvider = window.AdProvider || []).push({ serve: {} });
-      })
-      .catch(() => {});
+    const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
+    const zoneId = isDesktopAd ? '5968882' : '5968878';
+    const ins = document.createElement('ins');
+    ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';
+    ins.setAttribute('data-zoneid', zoneId);
+    topAdWrap.innerHTML = '';
+    topAdWrap.appendChild(ins);
+    topAdWrap.classList.remove('hidden-el');
+    (window.AdProvider = window.AdProvider || []).push({ serve: {} });
   }
   loadTopAd();
 

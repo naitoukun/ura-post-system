@@ -676,9 +676,9 @@ def find_creator(creators, creator_id):
 def build_pickup(serialized, creators):
     """TOPページの「ピックアップ」枠を組み立てる。
 
-    管理者が「ピックアップに固定表示」に指定した投稿者がいれば、その投稿者の
-    最新投稿を1人1件ずつ優先的に含め、残り枠を今まで通り無作為抽選で埋める。
-    固定表示の指定が無ければ完全ランダム(従来通り)。
+    管理者が「ピックアップに固定表示」に指定した投稿者が1人でもいれば、ピックアップは
+    その投稿者たちの最新投稿(1人1件)だけで構成する(他の投稿者からの補充はしない)。
+    固定表示の指定が誰もいなければ、従来通り全体から完全ランダムに選ぶ。
     固定表示の投稿者が枠数を超える場合は、呼ばれるたびに無作為に一部だけ選ぶ
     (特定の子だけが毎回全員居座り続けて他の固定表示者の出番が無くなるのを防ぐ)。
     """
@@ -699,17 +699,8 @@ def build_pickup(serialized, creators):
     if len(featured_items) > MAX_TOP_PICKUP_COUNT:
         featured_items = random.sample(featured_items, MAX_TOP_PICKUP_COUNT)
 
-    remaining_slots = MAX_TOP_PICKUP_COUNT - len(featured_items)
-    fill = []
-    if remaining_slots > 0:
-        # 既に枠を確保した投稿者の他の投稿は、ランダム枠で重複して選ばれないよう除外する
-        chosen_creator_ids = {i.get("ownerCreatorId") for i in featured_items}
-        rest_pool = [i for i in serialized if i.get("ownerCreatorId") not in chosen_creator_ids]
-        fill = random.sample(rest_pool, min(remaining_slots, len(rest_pool)))
-
-    pickup = featured_items + fill
-    random.shuffle(pickup)  # 固定表示分が毎回先頭に固まって見えないようにする
-    return pickup
+    random.shuffle(featured_items)
+    return featured_items
 
 
 def find_creator_by_login_code(creators, login_code):

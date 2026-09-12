@@ -956,6 +956,10 @@
       creator.status === 'active' ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'
     );
 
+    if (creator.pickupFeatured) {
+      addBadge('💎 ピックアップ固定表示', 'bg-teal-50 text-teal-700');
+    }
+
     const idBadgeMap = {
       approved: ['身分証確認済み', 'bg-teal-50 text-teal-700'],
       pending: ['身分証審査中', 'bg-amber-50 text-amber-700'],
@@ -1461,6 +1465,39 @@
         body.appendChild(row);
       });
     }
+
+    const pickupFeaturedBtn = document.createElement('button');
+    pickupFeaturedBtn.type = 'button';
+    pickupFeaturedBtn.textContent = creator.pickupFeatured
+      ? '💎 ピックアップ固定表示中（解除する）'
+      : '💎 ピックアップに固定表示する';
+    pickupFeaturedBtn.className = creator.pickupFeatured
+      ? 'self-start text-xs font-medium text-teal-600 hover:text-teal-700 mt-1'
+      : 'self-start text-xs font-medium text-slate-400 hover:text-slate-600 mt-1';
+    pickupFeaturedBtn.addEventListener('click', () => {
+      const nextFeatured = !creator.pickupFeatured;
+      pickupFeaturedBtn.disabled = true;
+      fetch('/api/creators/set-pickup-featured', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: creator.id, featured: nextFeatured }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+          } else {
+            pickupFeaturedBtn.disabled = false;
+            alert('更新に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          pickupFeaturedBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    body.appendChild(pickupFeaturedBtn);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';

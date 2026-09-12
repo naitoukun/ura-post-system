@@ -638,6 +638,45 @@ def find_creator(creators, creator_id):
     return next((c for c in creators if c["id"] == creator_id), None)
 
 
+def build_pickup(serialized, creators):
+    """TOPページの「ピックアップ」枠を組み立てる。
+
+    管理者が「ピックアップに固定表示」に指定した投稿者がいれば、その投稿者の
+    最新投稿を1人1件ずつ優先的に含め、残り枠を今まで通り無作為抽選で埋める。
+    固定表示の指定が無ければ完全ランダム(従来通り)。
+    固定表示の投稿者が枠数を超える場合は、呼ばれるたびに無作為に一部だけ選ぶ
+    (特定の子だけが毎回全員居座り続けて他の固定表示者の出番が無くなるのを防ぐ)。
+    """
+    featured_ids = {c["id"] for c in creators if c.get("pickup_featured")}
+    if not featured_ids:
+        return random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT))
+
+    latest_by_creator = {}
+    for item in serialized:
+        creator_id = item.get("ownerCreatorId")
+        if creator_id not in featured_ids:
+            continue
+        existing = latest_by_creator.get(creator_id)
+        if not existing or (item["uploadedAt"] or "") > (existing["uploadedAt"] or ""):
+            latest_by_creator[creator_id] = item
+
+    featured_items = list(latest_by_creator.values())
+    if len(featured_items) > MAX_TOP_PICKUP_COUNT:
+        featured_items = random.sample(featured_items, MAX_TOP_PICKUP_COUNT)
+
+    remaining_slots = MAX_TOP_PICKUP_COUNT - len(featured_items)
+    fill = []
+    if remaining_slots > 0:
+        # 既に枠を確保した投稿者の他の投稿は、ランダム枠で重複して選ばれないよう除外する
+        chosen_creator_ids = {i.get("ownerCreatorId") for i in featured_items}
+        rest_pool = [i for i in serialized if i.get("ownerCreatorId") not in chosen_creator_ids]
+        fill = random.sample(rest_pool, min(remaining_slots, len(rest_pool)))
+
+    pickup = featured_items + fill
+    random.shuffle(pickup)  # 固定表示分が毎回先頭に固まって見えないようにする
+    return pickup
+
+
 def find_creator_by_login_code(creators, login_code):
     return next((c for c in creators if c.get("login_code") == login_code and c.get("status") == "active"), None)
 
@@ -2187,11 +2226,7 @@ class Handler(BaseHTTPRequestHandler):
             q_lower = search_query.lower()
             serialized = [x for x in serialized if q_lower in (x["creatorDisplayName"] or "").lower()]
 
-        pickup = (
-            random.sample(serialized, min(len(serialized), MAX_TOP_PICKUP_COUNT))
-            if offset == 0 and not is_filtered
-            else None
-        )
+        pickup = build_pickup(serialized, creators) if offset == 0 and not is_filtered else None
         serialized.sort(key=lambda x: x["uploadedAt"] or "", reverse=True)
 
         page = serialized[offset:offset + limit]
@@ -2373,6 +2408,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_points()
+        elif path == "/api/creators/set-pickup-featured":
+            if self.require_auth():
+                return
+            self.handle_set_creator_pickup_featured()
         elif path == "/api/creators/invite":
             if self.require_auth():
                 return
@@ -3951,6 +3990,7 @@ class Handler(BaseHTTPRequestHandler):
                 ),
                 "pointsBalance": c.get("points_balance", 0),
                 "pointsBalanceYen": points_to_yen(c.get("points_balance", 0)),
+                "pickupFeatured": bool(c.get("pickup_featured")),
                 "redemptionRequests": [serialize_redemption_request(r) for r in c.get("redemption_requests", [])],
                 "invitedAt": c.get("invited_at"),
                 "activatedAt": c.get("activated_at"),
@@ -3970,6 +4010,30 @@ class Handler(BaseHTTPRequestHandler):
             for c in sorted(creators, key=lambda c: c.get("invited_at", ""), reverse=True)
         ]
         self.respond_json(200, body)
+
+    def handle_set_creator_pickup_featured(self):
+        """管理者が、その投稿者をTOPページの「ピックアップ」枠に優先的に表示させるか
+        どうかを切り替える(build_pickup参照)。"""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 2_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, data.get("id"))
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+            creator["pickup_featured"] = bool(data.get("featured"))
+            save_creators(creators)
+
+        self.respond_json(200, {"ok": True, "featured": creator["pickup_featured"]})
 
     def handle_creators_invite(self):
         content_length = int(self.headers.get("Content-Length", 0))

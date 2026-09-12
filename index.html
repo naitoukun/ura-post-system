@@ -709,7 +709,9 @@
       const contentPageAdZoneId = isDesktopAd ? info.contentPageAdZoneIdDesktop : info.contentPageAdZoneIdMobile;
       if (contentPageAdZoneId) {
         const ins = document.createElement('ins');
-        ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';
+        // 固定表示でコンテンツに覆いかぶさるSticky Banner/Mobile Instant Messageから、
+        // 通常のインラインBanner/Mobile Bannerに切り替えたため、タグのclassも別物になっている
+        ins.className = isDesktopAd ? 'eas6a97888e2' : 'eas6a97888e10';
         ins.setAttribute('data-zoneid', contentPageAdZoneId);
         contentPageAdWrap.innerHTML = '';
         contentPageAdWrap.appendChild(ins);

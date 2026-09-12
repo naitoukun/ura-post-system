@@ -625,7 +625,9 @@
         const zoneId = isDesktopAd ? info.adPageBannerZoneIdDesktop : info.adPageBannerZoneIdMobile;
         if (!zoneId) return;
         const ins = document.createElement('ins');
-        ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';
+        // 固定表示で画面の別の場所に飛び出て出てしまうSticky Banner/Mobile Instant
+        // Messageから、通常のインラインBanner/Mobile Bannerに切り替えた
+        ins.className = isDesktopAd ? 'eas6a97888e2' : 'eas6a97888e10';
         ins.setAttribute('data-zoneid', zoneId);
         adPageBannerWrap.innerHTML = '';
         adPageBannerWrap.appendChild(ins);

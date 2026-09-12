@@ -268,31 +268,25 @@
     pickupTrack.addEventListener(evt, () => { pickupTrack.style.animationPlayState = 'running'; }, { passive: true });
   });
 
-  // 新着一覧の1記事分のカード。上に投稿者名タグ+日付、下に大きめのサムネイル。
+  // 新着一覧の1記事分のカード。上に投稿者名タグ(あれば)、下に大きめのサムネイル。
+  // 日付はあえて表示しない(投稿頻度がまだ低く、間隔の空きが目立ってしまうため)。
   function buildPostCard(item) {
     const card = document.createElement('article');
     card.className = 'card rounded-2xl overflow-hidden flex flex-col';
 
-    const meta = document.createElement('div');
-    meta.className = 'flex items-center justify-between gap-2 px-3 py-2';
-
     if (item.ownerCreatorId && item.creatorDisplayName) {
       // 投稿者名タグ。押すとその投稿者の一覧(/creator-posts/<id>)に飛ぶ。
+      const meta = document.createElement('div');
+      meta.className = 'flex items-center gap-2 px-3 py-2';
+
       const tag = document.createElement('a');
       tag.href = '/creator-posts/' + encodeURIComponent(item.ownerCreatorId);
       tag.className = 'text-xs font-bold text-teal-700 truncate hover:underline';
       tag.textContent = item.creatorDisplayName;
       meta.appendChild(tag);
-    } else {
-      meta.appendChild(document.createElement('span'));
+
+      card.appendChild(meta);
     }
-
-    const date = document.createElement('span');
-    date.className = 'text-[11px] text-slate-400 shrink-0';
-    date.textContent = (item.uploadedAt || '').slice(0, 10);
-    meta.appendChild(date);
-
-    card.appendChild(meta);
 
     const link = document.createElement('a');
     link.href = '/?v=' + encodeURIComponent(item.id);

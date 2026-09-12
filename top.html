@@ -62,6 +62,34 @@
     background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
     color:#ffffff;
   }
+  /* ピックアップの横自動スクロール帯。transformのCSSアニメーションのみで動かす
+     (JSでscrollLeftをポーリングするより軽く、GPUで処理されるためスマホでも滑らか)。
+     中身は同じ並びを2セット並べておき、ちょうど半分(1セット分)だけ動かしたところで
+     0に戻すことで、途切れなくループして見えるようにしている。 */
+  .pickup-marquee-viewport{
+    overflow:hidden;
+  }
+  .pickup-marquee-track{
+    display:flex;
+    gap:0.5rem;
+    width:max-content;
+    animation-name:pickup-marquee-scroll;
+    animation-timing-function:linear;
+    animation-iteration-count:infinite;
+  }
+  @keyframes pickup-marquee-scroll{
+    from{ transform:translateX(0); }
+    to{ transform:translateX(-50%); }
+  }
+  /* 「視差効果を減らす」設定のユーザーには自動で動かさず、指でスクロールできる帯として出す */
+  @media (prefers-reduced-motion: reduce){
+    .pickup-marquee-viewport{
+      overflow-x:auto;
+    }
+    .pickup-marquee-track{
+      animation:none;
+    }
+  }
 </style>
 </head>
 <body class="min-h-screen w-full p-4" style="background:var(--bg-page);">
@@ -112,10 +140,14 @@
     </div>
   </div>
 
-  <!-- 埋もれ対策: 新着順とは別に、無作為に選んだ投稿を毎回出す枠(古い投稿にも光を当てる) -->
+  <!-- 埋もれ対策: 新着順とは別に、無作為に選んだ投稿を毎回出す枠(古い投稿にも光を当てる)。
+       横自動スクロールの帯で目立たせる(prefers-reduced-motionでは静止表示に切り替え、
+       指で触れている間は一時停止する)。 -->
   <div id="pickupSection" class="hidden-el flex flex-col gap-2">
     <p class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">💎 ピックアップ 💎</p>
-    <div id="pickupGrid" class="grid grid-cols-3 gap-2"></div>
+    <div class="pickup-marquee-viewport rounded-xl">
+      <div id="pickupTrack" class="pickup-marquee-track"></div>
+    </div>
   </div>
 
   <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
@@ -159,7 +191,7 @@
   const emptyText = document.getElementById('emptyText');
   const postsGrid = document.getElementById('postsGrid');
   const pickupSection = document.getElementById('pickupSection');
-  const pickupGrid = document.getElementById('pickupGrid');
+  const pickupTrack = document.getElementById('pickupTrack');
   const loadMoreSentinel = document.getElementById('loadMoreSentinel');
   const topAdWrap = document.getElementById('topAdWrap');
   const feedHeading = document.getElementById('feedHeading');
@@ -188,6 +220,47 @@
 
     return link;
   }
+
+  // ピックアップの横スクロール帯用。grid-cols-3で幅が決まる通常のサムネイルと違い、
+  // flexの中で固定幅を持たせる必要がある(shrink-0)。
+  function buildMarqueeThumb(item) {
+    const link = buildThumbLink(item);
+    link.className = 'block w-24 aspect-square rounded-lg overflow-hidden bg-gray-100 relative shrink-0';
+    return link;
+  }
+
+  const PICKUP_SECONDS_PER_ITEM = 2.2; // 1件あたりの表示時間の目安(件数が増えても体感速度を揃える)
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ピックアップ帯の中身を差し替える。シームレスにループさせるため、同じ並びを
+  // (視差効果を減らす設定でなければ)もう1セット複製して並べる。
+  function renderPickupTrack(items) {
+    pickupTrack.innerHTML = '';
+    pickupTrack.style.animation = '';
+    if (!items.length) return;
+
+    const sets = prefersReducedMotion ? [items] : [items, items];
+    sets.forEach((set) => {
+      set.forEach((item) => {
+        pickupTrack.appendChild(buildMarqueeThumb(item));
+      });
+    });
+
+    if (!prefersReducedMotion) {
+      pickupTrack.style.animationDuration = (items.length * PICKUP_SECONDS_PER_ITEM) + 's';
+    }
+  }
+
+  // 指で触れている間・マウスホバー中はアニメーションを一時停止する(読みたいのに
+  // 動き続けて選びにくい、という状態を避けるため)。クラス経由でanimation-play-state
+  // を切り替えると実際には一時停止しない場合があったため、インラインスタイルで
+  // 直接制御する。
+  ['pointerdown', 'mouseenter', 'touchstart'].forEach((evt) => {
+    pickupTrack.addEventListener(evt, () => { pickupTrack.style.animationPlayState = 'paused'; }, { passive: true });
+  });
+  ['pointerup', 'mouseleave', 'touchend', 'touchcancel'].forEach((evt) => {
+    pickupTrack.addEventListener(evt, () => { pickupTrack.style.animationPlayState = 'running'; }, { passive: true });
+  });
 
   // 新着一覧の1記事分のカード。上に投稿者名タグ+日付、下に大きめのサムネイル。
   function buildPostCard(item) {
@@ -286,9 +359,7 @@
 
         if (pickup && pickup.length) {
           pickupSection.classList.remove('hidden-el');
-          pickup.forEach((item) => {
-            pickupGrid.appendChild(buildThumbLink(item));
-          });
+          renderPickupTrack(pickup);
         }
 
         if (offset === 0 && !items.length) {
@@ -328,7 +399,7 @@
     hasMore = true;
     isLoading = false;
     postsGrid.innerHTML = '';
-    pickupGrid.innerHTML = '';
+    renderPickupTrack([]);
     // 検索結果とランダムピックアップが混ざると分かりにくいため、絞り込み中は隠す
     // (サーバー側も絞り込み中はpickupを返さない)。
     pickupSection.classList.toggle('hidden-el', isFiltered);

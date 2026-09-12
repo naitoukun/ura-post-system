@@ -284,7 +284,7 @@
     <!-- 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンIDが異なるため、
          判定した方の<ins>だけをJS側で動的に生成する(両方を置いて片方をCSSで隠すと、
          隠した方にも広告リクエストが飛んでしまうため)。 -->
-    <div id="contentPageAdWrap" class="hidden-el w-full flex justify-center"></div>
+    <div id="contentPageAdWrap" class="hidden-el w-full"></div>
   </div>
 
   <!-- フッター（サイト実態と一致する表記） -->
@@ -703,12 +703,10 @@
         body: JSON.stringify({ id: info.id, token: info.mediaToken }),
       }).catch(() => {});
 
-      // 視聴ページ(動画・画像共通)のバナー広告。投稿ページはSticky Banner/Mobile Instant
-      // Message(固定表示)のゾーンに戻した(top.html/creator-posts.htmlは非固定のBanner/
-      // Mobile Bannerのまま)。ページによってゾーンの種類が異なるため、あえて管理画面の
-      // 共通設定(contentPageAdZoneId*)は使わずこの2つだけ直接指定している。
+      // 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンID・タグが異なるため、
+      // 判定した方の<ins>だけを生成する(両方は作らない=片方だけに広告リクエストを飛ばす)。
       const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
-      const contentPageAdZoneId = isDesktopAd ? '5968882' : '5968878';
+      const contentPageAdZoneId = isDesktopAd ? info.contentPageAdZoneIdDesktop : info.contentPageAdZoneIdMobile;
       if (contentPageAdZoneId) {
         const ins = document.createElement('ins');
         ins.className = isDesktopAd ? 'eas6a97888e17' : 'eas6a97888e14';

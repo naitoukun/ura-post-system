@@ -110,7 +110,9 @@
   </div>
 </div>
 
-<div class="w-full max-w-md mx-auto flex flex-col gap-4 py-4">
+<!-- PCではmax-w-mdのまま真ん中に浮かせず、横幅を活かして多カラム表示にする。
+     ブレークポイントは他の箇所(広告ゾーンのPC/スマホ判定等)と揃えてmd(768px)。 -->
+<div class="w-full max-w-md md:max-w-5xl mx-auto flex flex-col gap-4 py-4">
   <div class="card rounded-2xl p-5 flex flex-col items-center text-center gap-1.5">
     <h1 class="brand text-3xl"><span class="text-slate-800">URA-POST</span><span class="brand-accent">.COM</span></h1>
     <p class="text-sm font-bold text-slate-700 mt-1">Xで活動する女の子を応援するサイト💕</p>
@@ -125,18 +127,18 @@
   <!-- 検索・絞り込み。タグ等の分類データは無いため、投稿者名の部分一致検索と
        種別(動画/画像)の絞り込みのみ。検索中はピックアップ枠を一旦隠す(結果と
        混ざると分かりにくいため)。 -->
-  <div class="card rounded-2xl p-3 flex flex-col gap-2">
+  <div class="card rounded-2xl p-3 flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
     <input
       id="searchInput"
       type="search"
       inputmode="search"
       placeholder="🔍 投稿者名で検索"
-      class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+      class="w-full md:flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
     >
-    <div class="flex gap-2">
-      <button type="button" data-type="" class="type-filter-btn flex-1 rounded-lg py-1.5 text-xs font-bold border">すべて</button>
-      <button type="button" data-type="video" class="type-filter-btn flex-1 rounded-lg py-1.5 text-xs font-bold border">動画</button>
-      <button type="button" data-type="image" class="type-filter-btn flex-1 rounded-lg py-1.5 text-xs font-bold border">画像</button>
+    <div class="flex gap-2 md:shrink-0">
+      <button type="button" data-type="" class="type-filter-btn flex-1 md:flex-none md:px-5 rounded-lg py-1.5 text-xs font-bold border">すべて</button>
+      <button type="button" data-type="video" class="type-filter-btn flex-1 md:flex-none md:px-5 rounded-lg py-1.5 text-xs font-bold border">動画</button>
+      <button type="button" data-type="image" class="type-filter-btn flex-1 md:flex-none md:px-5 rounded-lg py-1.5 text-xs font-bold border">画像</button>
     </div>
   </div>
 
@@ -154,7 +156,8 @@
 
   <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
   <div id="emptyText" class="hidden-el text-sm text-slate-400">投稿が見つかりませんでした。</div>
-  <div id="postsGrid" class="flex flex-col gap-4"></div>
+  <!-- PCでは縦積みではなく3列グリッドにして、同じスクロール量でも見える投稿数を増やす -->
+  <div id="postsGrid" class="flex flex-col gap-4 md:grid md:grid-cols-3"></div>
   <!-- 無限スクロール用の目印。これが画面内に入ったら次のページを読み込む -->
   <div id="loadMoreSentinel" class="hidden-el text-center text-xs text-slate-400 py-2">読み込み中…</div>
 

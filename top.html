@@ -155,6 +155,19 @@
     </div>
   </div>
 
+  <!-- 週間/月間ランキング。直近7日/30日の有効視聴数(水増し対策済みのview_countと同じ
+       基準)が多い順。0件の投稿だけになった場合はサーバー側で除外済みなので、
+       枠自体が空になる場合は非表示にする。 -->
+  <div id="weeklyRankingSection" class="hidden-el flex flex-col gap-2">
+    <p class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🔥 週間ランキング 🔥</p>
+    <div id="weeklyRankingGrid" class="grid grid-cols-3 gap-2 md:grid-cols-5"></div>
+  </div>
+
+  <div id="monthlyRankingSection" class="hidden-el flex flex-col gap-2">
+    <p class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">📅 月間ランキング 📅</p>
+    <div id="monthlyRankingGrid" class="grid grid-cols-3 gap-2 md:grid-cols-5"></div>
+  </div>
+
   <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
 
   <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
@@ -198,6 +211,10 @@
   const postsGrid = document.getElementById('postsGrid');
   const pickupSection = document.getElementById('pickupSection');
   const pickupTrack = document.getElementById('pickupTrack');
+  const weeklyRankingSection = document.getElementById('weeklyRankingSection');
+  const weeklyRankingGrid = document.getElementById('weeklyRankingGrid');
+  const monthlyRankingSection = document.getElementById('monthlyRankingSection');
+  const monthlyRankingGrid = document.getElementById('monthlyRankingGrid');
   const loadMoreSentinel = document.getElementById('loadMoreSentinel');
   const topAdWrap = document.getElementById('topAdWrap');
   const feedHeading = document.getElementById('feedHeading');
@@ -233,6 +250,31 @@
     const link = buildThumbLink(item);
     link.className = 'block w-36 md:w-48 aspect-square rounded-lg overflow-hidden bg-gray-100 relative shrink-0';
     return link;
+  }
+
+  // ランキング枠用。通常のサムネイルに順位バッジを重ねる。
+  function buildRankingThumb(item, rank) {
+    const link = buildThumbLink(item);
+
+    const rankBadge = document.createElement('span');
+    rankBadge.className = 'absolute top-1 left-1 btn-primary text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm';
+    rankBadge.textContent = String(rank);
+    link.appendChild(rankBadge);
+
+    return link;
+  }
+
+  // ランキング枠(週間/月間共通)の中身を差し替える。0件(=対象の投稿が無い)なら枠ごと隠す。
+  function renderRankingGrid(section, grid, items) {
+    grid.innerHTML = '';
+    if (!items || !items.length) {
+      section.classList.add('hidden-el');
+      return;
+    }
+    section.classList.remove('hidden-el');
+    items.forEach((item, index) => {
+      grid.appendChild(buildRankingThumb(item, index + 1));
+    });
   }
 
   const PICKUP_SECONDS_PER_ITEM = 2.2; // 1件あたりの表示時間の目安(件数が増えても体感速度を揃える)
@@ -357,6 +399,12 @@
           pickupSection.classList.remove('hidden-el');
           renderPickupTrack(pickup);
         }
+        if (data && data.weeklyRanking) {
+          renderRankingGrid(weeklyRankingSection, weeklyRankingGrid, data.weeklyRanking);
+        }
+        if (data && data.monthlyRanking) {
+          renderRankingGrid(monthlyRankingSection, monthlyRankingGrid, data.monthlyRanking);
+        }
 
         if (offset === 0 && !items.length) {
           emptyText.classList.remove('hidden-el');
@@ -396,8 +444,10 @@
     isLoading = false;
     postsGrid.innerHTML = '';
     renderPickupTrack([]);
-    // 検索結果とランダムピックアップが混ざると分かりにくいため、絞り込み中は隠す
-    // (サーバー側も絞り込み中はpickupを返さない)。
+    renderRankingGrid(weeklyRankingSection, weeklyRankingGrid, []);
+    renderRankingGrid(monthlyRankingSection, monthlyRankingGrid, []);
+    // 検索結果とランダムピックアップ/ランキングが混ざると分かりにくいため、絞り込み中は
+    // 隠す(サーバー側も絞り込み中はpickup/ランキングを返さない)。
     pickupSection.classList.toggle('hidden-el', isFiltered);
     emptyText.classList.add('hidden-el');
     loadingText.classList.remove('hidden-el');

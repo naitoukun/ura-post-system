@@ -542,6 +542,41 @@ MAX_TOP_PICKUP_COUNT = 10
 TOP_POSTS_PAGE_SIZE = 20
 MAX_TOP_POSTS_PAGE_SIZE = 50
 
+# 週間/月間ランキングに表示する件数
+MAX_RANKING_COUNT = 9
+# 投稿ごとの日別閲覧数(daily_views)を保持しておく日数。月間ランキング(30日分)の
+# 集計に必要な期間より少し長めにとってあり、これより古い日付は書き込みのたびに
+# 間引いてデータが際限なく肥大化しないようにする。
+DAILY_VIEWS_RETENTION_DAYS = 35
+
+
+def record_daily_view(video):
+    """視聴ページの有効視聴数(view_count)と同じタイミングで、日別の内訳も記録する。
+    週間/月間ランキングの集計に使う。呼び出し側でVIDEOS_LOCK取得・save_videosすること。
+    """
+    today_str = time.strftime("%Y-%m-%d")
+    daily_views = video.setdefault("daily_views", {})
+    daily_views[today_str] = daily_views.get(today_str, 0) + 1
+
+    cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - DAILY_VIEWS_RETENTION_DAYS * 86400))
+    for date_str in list(daily_views.keys()):
+        if date_str < cutoff:
+            del daily_views[date_str]
+
+
+def sum_recent_views(video, days):
+    """直近days日分のview_countの合計(週間/月間ランキングのスコア)を返す。"""
+    daily_views = video.get("daily_views") or {}
+    cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
+    return sum(count for date_str, count in daily_views.items() if date_str >= cutoff)
+
+
+def build_ranking(serialized, key, count):
+    """週間/月間ランキング用に、スコア(key)が1以上のものだけを降順で上位count件返す。"""
+    ranked = [x for x in serialized if x[key] > 0]
+    ranked.sort(key=lambda x: x[key], reverse=True)
+    return ranked[:count]
+
 # creators.json への書き込みは、ポイント残高・交換申請という「実害に直結する値」を
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
 CREATORS_LOCK = threading.Lock()
@@ -1827,6 +1862,7 @@ class Handler(BaseHTTPRequestHandler):
                 video = next((v for v in videos_list if v["id"] == video_id), None)
                 if video and should_count_view(video_id, get_client_ip(self)):
                     video["view_count"] = video.get("view_count", 0) + 1
+                    record_daily_view(video)
                     save_videos(videos_list)
 
         self.respond_json(200, {"ok": True})
@@ -2170,11 +2206,12 @@ class Handler(BaseHTTPRequestHandler):
         新着順(items)だけだと、投稿頻度が低い子の投稿がどんどん下に沈んで実質見えなく
         なってしまうため、同じ母集団から無作為に選んだ「ピックアップ」枠(pickup)も
         一緒に返す。呼ばれるたびに毎回抽選し直すので、特定の投稿が固定で埋もれ続けることはない。
+        週間/月間ランキング(weeklyRanking/monthlyRanking)も同様に、直近7日/30日の
+        有効視聴数(daily_views、水増し対策済みのview_countと同じ基準)が多い順で返す。
 
         投稿数が増えても1回のレスポンスが肥大化しないよう、?offset=&limit=でページングする。
-        pickupは初回(offset=0)かつ検索条件が無いレスポンスにのみ含める(検索結果と
-        ランダムピックアップが混ざると分かりにくいうえ、2ページ目以降で重複して
-        抽選し直す意味も無いため)。
+        pickup/ランキングは初回(offset=0)かつ検索条件が無いレスポンスにのみ含める
+        (検索結果と混ざると分かりにくいうえ、2ページ目以降で重複して計算し直す意味も無いため)。
 
         ?q=<投稿者名の部分一致(大文字小文字を区別しない)>、?contentType=video|image で
         絞り込める(タグ等の分類は無いため、今のデータで実現できる範囲のみ)。
@@ -2216,6 +2253,8 @@ class Handler(BaseHTTPRequestHandler):
                     if v.get("owner_creator_id") and find_creator(creators, v.get("owner_creator_id"))
                     else None
                 ),
+                "weeklyViews": sum_recent_views(v, 7),
+                "monthlyViews": sum_recent_views(v, 30),
             }
             for v in items
         ]
@@ -2226,13 +2265,20 @@ class Handler(BaseHTTPRequestHandler):
             q_lower = search_query.lower()
             serialized = [x for x in serialized if q_lower in (x["creatorDisplayName"] or "").lower()]
 
-        pickup = build_pickup(serialized, creators) if offset == 0 and not is_filtered else None
+        include_extras = offset == 0 and not is_filtered
+        pickup = build_pickup(serialized, creators) if include_extras else None
+        weekly_ranking = build_ranking(serialized, "weeklyViews", MAX_RANKING_COUNT) if include_extras else None
+        monthly_ranking = build_ranking(serialized, "monthlyViews", MAX_RANKING_COUNT) if include_extras else None
         serialized.sort(key=lambda x: x["uploadedAt"] or "", reverse=True)
 
         page = serialized[offset:offset + limit]
         response = {"items": page, "hasMore": offset + limit < len(serialized)}
         if pickup is not None:
             response["pickup"] = pickup
+        if weekly_ranking is not None:
+            response["weeklyRanking"] = weekly_ranking
+        if monthly_ranking is not None:
+            response["monthlyRanking"] = monthly_ranking
 
         self.respond_json(200, response)
 

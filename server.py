@@ -964,6 +964,24 @@ def verify_media_token(video_id, token):
     return hmac.compare_digest(expected, signature)
 
 
+# 身分証提出の通知メールに載せる「ワンクリック承認/却下」リンク用の署名付きトークン。
+# 管理者ログイン無しで実行できてしまう分、creator_id+action(承認 or 却下)の組み合わせ
+# ごとに専用の署名にすることで、他のクリエイターへの承認や別の操作への転用を防ぐ。
+# 有効期限は設けていない(URL_SIGNING_SECRETがプロセス起動のたびに再生成されるプロセス内
+# 限定の秘密鍵のため、サーバー再起動だけで自然に無効化される)。
+def generate_id_review_token(creator_id, action):
+    return hmac.new(
+        URL_SIGNING_SECRET, f"{creator_id}:{action}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def verify_id_review_token(creator_id, action, token):
+    if not token:
+        return False
+    expected = generate_id_review_token(creator_id, action)
+    return hmac.compare_digest(expected, token)
+
+
 def video_file_path(video):
     """コンテンツの実体ファイルの存在確認用。画像ギャラリーの場合は1枚目で代表させる。"""
     if video.get("content_type") == "image":
@@ -1686,6 +1704,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_creators_id_document(parse_qs(split.query))
+        elif path == "/api/creator-id-review":
+            # 通知メールからのワンクリック承認/却下用。管理者ログイン不要(署名付き
+            # トークンで認可する)。
+            self.handle_id_review_link(parse_qs(split.query))
         elif path == "/api/creator/content/video-source":
             if self.require_creator_auth():
                 return
@@ -3648,9 +3670,21 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
             display_name = creator.get("display_name") or "（名前未設定）"
 
+        approve_url = (
+            PUBLIC_SITE_URL + "/api/creator-id-review?creatorId=" + creator_id
+            + "&action=approve&token=" + generate_id_review_token(creator_id, "approve")
+        )
+        reject_url = (
+            PUBLIC_SITE_URL + "/api/creator-id-review?creatorId=" + creator_id
+            + "&action=reject&token=" + generate_id_review_token(creator_id, "reject")
+        )
         send_notification_email(
             "身分証提出 - " + display_name,
-            display_name + " さんが本人確認の身分証を提出しました。管理画面から確認・承認してください。",
+            display_name + " さんが本人確認の身分証を提出しました。\n"
+            + "画像自体はこのメールに含まれていません。内容は管理画面からご確認ください。\n\n"
+            + "確認の上、下記のリンクから管理画面を開き直さずそのまま承認/却下できます。\n\n"
+            + "承認する: " + approve_url + "\n\n"
+            + "却下する: " + reject_url,
         )
 
         self.respond_json(200, {"ok": True, "idVerificationStatus": "pending"})
@@ -4645,6 +4679,84 @@ class Handler(BaseHTTPRequestHandler):
                 os.remove(path)
         creator["id_document_filename"] = None
 
+    def _apply_id_review(self, creator_id, status, reason=None):
+        """身分証審査(承認/却下)の反映。管理画面のJSON API・通知メールのワンクリック
+        リンクの両方から使う共通処理。対象が見つからない/未提出ならFalseを返す。"""
+        with CREATORS_LOCK:
+            creators = load_creators()
+            creator = find_creator(creators, creator_id)
+            if not creator or not creator.get("id_document_filename"):
+                return False
+
+            creator["id_verification_status"] = status
+            creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            creator["id_rejection_reason"] = reason
+            self._delete_id_document_file(creator)
+            save_creators(creators)
+        return True
+
+    def _respond_id_review_html(self, status_code, title, message):
+        """身分証のワンクリック承認/却下リンク用の簡易な結果画面。管理者がスマホの
+        メールから直接開く想定のため、JSONではなく人間向けの簡単なHTMLを返す。"""
+        body = (
+            "<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"UTF-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<meta name=\"robots\" content=\"noindex, nofollow\">"
+            "<title>" + html.escape(title) + "</title>"
+            "<style>body{font-family:sans-serif;background:#faf3ea;display:flex;"
+            "align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;"
+            "box-sizing:border-box;}"
+            ".card{background:#fff;border-radius:16px;padding:32px 24px;max-width:360px;"
+            "text-align:center;box-shadow:0 4px 20px rgba(120,90,50,0.08);}"
+            "h1{font-size:18px;color:#334155;margin:0 0 12px;}"
+            "p{font-size:14px;color:#64748b;margin:0 0 20px;}"
+            "a{display:inline-block;background:linear-gradient(180deg,#7fccc0,#4a9d90);"
+            "color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;"
+            "font-weight:bold;font-size:14px;}</style></head><body>"
+            "<div class=\"card\"><h1>" + html.escape(title) + "</h1>"
+            "<p>" + html.escape(message) + "</p>"
+            "<a href=\"/admin\">管理画面を開く</a></div></body></html>"
+        ).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_id_review_link(self, query):
+        """身分証提出の通知メールに載せる、ログイン不要のワンクリック承認/却下リンク。
+        creator_id+actionに対する署名付きトークン(generate_id_review_token)を検証して
+        から実行する。トークンさえ合っていれば管理者セッションが無くても実行できる
+        設計のため、メール本文以外にこのURLを貼らないよう管理者側で扱いに注意すること。
+        """
+        creator_id = (query.get("creatorId") or [None])[0]
+        action = (query.get("action") or [None])[0]
+        token = (query.get("token") or [None])[0]
+
+        if action not in ("approve", "reject") or not creator_id or not verify_id_review_token(creator_id, action, token):
+            self._respond_id_review_html(
+                403, "リンクが無効です",
+                "リンクの有効期限が切れているか、既に処理済みの可能性があります。管理画面からご確認ください。",
+            )
+            return
+
+        creator = find_creator(load_creators(), creator_id)
+        display_name = (creator.get("display_name") if creator else None) or "（名前未設定）"
+        status = "approved" if action == "approve" else "rejected"
+        label = "承認" if action == "approve" else "却下"
+
+        if not self._apply_id_review(creator_id, status):
+            self._respond_id_review_html(
+                200, "既に処理済みです",
+                display_name + " さんの身分証は、既に審査済みか未提出の状態です。",
+            )
+            return
+
+        self._respond_id_review_html(
+            200, label + "しました",
+            display_name + " さんの身分証提出を" + label + "しました。",
+        )
+
     def handle_creators_approve_id(self):
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length <= 0 or content_length > 2_000:
@@ -4658,19 +4770,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         creator_id = data.get("creatorId")
-
-        with CREATORS_LOCK:
-            creators = load_creators()
-            creator = find_creator(creators, creator_id)
-            if not creator or not creator.get("id_document_filename"):
-                self.respond_json(404, {"ok": False, "error": "not_found"})
-                return
-
-            creator["id_verification_status"] = "approved"
-            creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            creator["id_rejection_reason"] = None
-            self._delete_id_document_file(creator)
-            save_creators(creators)
+        if not self._apply_id_review(creator_id, "approved"):
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
 
         self.respond_json(200, {"ok": True, "idVerificationStatus": "approved"})
 
@@ -4692,18 +4794,9 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": error})
             return
 
-        with CREATORS_LOCK:
-            creators = load_creators()
-            creator = find_creator(creators, creator_id)
-            if not creator or not creator.get("id_document_filename"):
-                self.respond_json(404, {"ok": False, "error": "not_found"})
-                return
-
-            creator["id_verification_status"] = "rejected"
-            creator["id_reviewed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            creator["id_rejection_reason"] = reason
-            self._delete_id_document_file(creator)
-            save_creators(creators)
+        if not self._apply_id_review(creator_id, "rejected", reason):
+            self.respond_json(404, {"ok": False, "error": "not_found"})
+            return
 
         self.respond_json(200, {"ok": True, "idVerificationStatus": "rejected", "reason": reason})
 

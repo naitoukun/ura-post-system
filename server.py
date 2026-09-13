@@ -1564,12 +1564,14 @@ class Handler(BaseHTTPRequestHandler):
         if len(path) > 1 and path.endswith("/"):
             path = path.rstrip("/")
         if path == "/":
-            # TOP(素のURL)は本来、共有リンク専用(個別の?v=<動画ID>を知っている相手だけが
-            # 動画にたどり着ける)。ただし将来の一般公開に向けたプレビューとして、
-            # 管理者ログイン中・?v=無しの場合だけ新着投稿一覧(top.html)を見せる
-            # (それ以外の訪問者には今まで通りの挙動のまま)。
+            # TOP(素のURL・?v=無し)は新着投稿一覧(top.html)を全訪問者に見せる
+            # (以前は管理者ログイン中のみのプレビュー段階だったが、投稿ページ側に
+            # 「他の投稿ももっと見る」導線を追加した際、一般訪問者がそこを押しても
+            # 行き止まりになる実害の方が大きくなったため解禁した)。
+            # 検索エンジンへの露出(top.html自体のnoindex解除)は投稿数が増えてから
+            # 別途判断する、別のスイッチとして残してある。
             query = parse_qs(split.query)
-            if not query.get("v") and self.is_authenticated():
+            if not query.get("v"):
                 self.serve_file(os.path.join(BASE_DIR, "top.html"), "text/html; charset=utf-8")
             else:
                 self.handle_serve_unlock_page(query)
@@ -1637,10 +1639,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/all-posts":
             self.handle_api_all_posts()
         elif path == "/api/top-posts":
-            # top.html(TOPページのプレビュー)用のデータ。ページ自体と同じく管理者専用
-            # (URLを直接叩かれても一覧が漏れないよう、APIレベルでも認証必須にする)。
-            if self.require_auth():
-                return
+            # top.html(TOPページ)用のデータ。ページ自体を全訪問者に公開したのに合わせ、
+            # 認証不要にしてある(/api/creator-posts等、他の公開一覧APIと同じ扱い)。
             self.handle_api_top_posts(parse_qs(split.query))
         elif path == "/api/videos":
             if self.require_auth():
@@ -2201,12 +2201,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def handle_api_top_posts(self, query):
-        """公開TOPページ(/)の新着投稿一覧用データ。
+        """公開TOPページ(/)の新着投稿一覧用データ。ページ自体と同じく認証不要・全公開。
 
         /api/creator-postsと同じ条件(所有者不問・実体ファイルが存在・期限切れでない・
-        unlisted指定でない)で全投稿を横断して返す。ページ自体(handle_serve_unlock_page)
-        を管理者ログイン中しか出さないのと合わせ、このAPIも認証必須にしてある
-        (URLを直接叩かれても一覧が漏れないように)。
+        unlisted指定でない・suspendedでない)で全投稿を横断して返す。
 
         新着順(items)だけだと、投稿頻度が低い子の投稿がどんどん下に沈んで実質見えなく
         なってしまうため、同じ母集団から無作為に選んだ「ピックアップ」枠(pickup)も

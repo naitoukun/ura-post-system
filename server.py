@@ -3630,9 +3630,11 @@ class Handler(BaseHTTPRequestHandler):
 
             new_filename = "iddoc_" + creator_id + ext
             new_path = os.path.join(UPLOAD_DIR, new_filename)
+            # 本人確認書類は特に機微な個人情報のため、ファイル権限(0o600)だけでなく
+            # 中身自体もPII_ENCRYPTION_KEYで暗号化してディスクに書く(生年月日と同じ鍵)。
+            # サーバーそのものやバックアップが漏れても、平文の身分証画像は残らない。
             with open(new_path, "wb") as f:
-                f.write(id_file["content"])
-            # 本人確認書類という機微情報のため、所有者(サーバープロセス)以外は読めないようにする
+                f.write(_pii_fernet.encrypt(id_file["content"]))
             os.chmod(new_path, 0o600)
 
             creator["id_document_filename"] = new_filename
@@ -4602,6 +4604,8 @@ class Handler(BaseHTTPRequestHandler):
         """管理者のみが閲覧できる、クリエイター提出の身分証の配信。
 
         機微情報のため一覧等には一切出さず、このルート経由でのみ(要admin認証)アクセスできる。
+        ディスク上は暗号化して保存している(handle_creator_submit_id参照)ため、
+        ここで復号してから配信する(serve_fileはそのまま使えない)。
         """
         creator_id = (query.get("creatorId") or [None])[0]
         creators = load_creators()
@@ -4614,8 +4618,19 @@ class Handler(BaseHTTPRequestHandler):
         if not os.path.exists(path):
             self.send_error(404, "Not Found")
             return
+        try:
+            with open(path, "rb") as f:
+                decrypted = _pii_fernet.decrypt(f.read())
+        except InvalidToken:
+            self.send_error(500, "Failed to decrypt document")
+            return
         content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        self.serve_file(path, content_type, extra_headers={"Cache-Control": "no-store"})
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(decrypted)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(decrypted)
 
     def _delete_id_document_file(self, creator):
         """審査(承認/却下)が終わった身分証の画像そのものは残さず削除する。

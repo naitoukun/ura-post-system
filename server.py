@@ -1,14 +1,12 @@
 """
 シークレット・ビューア: 開発用の簡易バックエンド。
 
-- GET  /                通常は動画アンロックページ(index.html)。共有リンク専用にするため
-                        一覧等は置かず、常にindex.htmlを返す。og:image等は?vに応じて動的に差し込む。
-                        例外: 管理者ログイン中に?v=無しでアクセスした場合だけ、一般公開に向けた
-                        プレビューとして新着投稿一覧(top.html)を返す
+- GET  /                ?v=有りなら動画アンロックページ(index.html、og:image等は?vに応じて動的に差し込む)。
+                        ?v=無しなら新着投稿一覧(top.html)を全訪問者に公開(認証不要、検索エンジン露出も解禁済み)。
 - GET  /index.html      動画アンロックページに直接アクセス(?v=無しでも常にアプリを表示。top.htmlへの切り替えは無し)
-- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧・ピックアップ枠(JSON、offset/limitでページング)※要ログイン
+- GET  /api/top-posts   TOPページ(top.html)用の新着投稿一覧・ピックアップ枠(JSON、offset/limitでページング。認証不要)
 - GET  /robots.txt      クローラー向け設定(静的ファイル)
-- GET  /sitemap.xml     検索エンジン向けの投稿URL一覧(公開・認証不要。TOPページが一般公開されるまでは実質未使用)
+- GET  /sitemap.xml     検索エンジン向けの投稿URL一覧(公開・認証不要)
 - GET  /admin           管理ページ。未ログインならログイン画面、ログイン済みならadmin.html
 - GET  /admin/totp-setup  TOTPシークレットをQRコード化するツール（サーバーの実際の値は扱わない）
 - GET  /video-merge-tool  クリエイター向け動画結合ツール（ブラウザ内完結、ログイン不要）
@@ -1586,8 +1584,7 @@ class Handler(BaseHTTPRequestHandler):
             # (以前は管理者ログイン中のみのプレビュー段階だったが、投稿ページ側に
             # 「他の投稿ももっと見る」導線を追加した際、一般訪問者がそこを押しても
             # 行き止まりになる実害の方が大きくなったため解禁した)。
-            # 検索エンジンへの露出(top.html自体のnoindex解除)は投稿数が増えてから
-            # 別途判断する、別のスイッチとして残してある。
+            # 検索エンジンへの露出(noindex解除)も2026-09-13に解禁済み(top.html参照)。
             query = parse_qs(split.query)
             if not query.get("v"):
                 self.serve_file(os.path.join(BASE_DIR, "top.html"), "text/html; charset=utf-8")
@@ -2193,8 +2190,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_serve_sitemap(self):
         """検索エンジン向けのsitemap.xml(公開・認証不要)。
 
-        TOPページ(/)自体は既に全訪問者に公開済みだが、投稿数がまだ少ないため
-        noindexにして検索エンジンへの露出はもう少し待っている段階(top.html参照)。
+        TOPページ(/)は全訪問者に公開済み、noindexも解除済み(top.html参照)。
         掲載するのは現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・
         期限切れ・unlisted・管理者による一時非公開は除外)。
         """

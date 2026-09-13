@@ -432,6 +432,11 @@ TIME_LIMIT_SECONDS = 24 * 60 * 60
 # 文言に差し替える(handle_serve_unlock_page参照)。
 DEFAULT_META_DESCRIPTION = "Xで活動する女の子を応援するサイト。限定画像・動画を広告視聴で無料アンロック。"
 
+# 投稿ページ(index.html)のh1既定文言。投稿者が分かる場合はhandle_serve_unlock_page側で
+# 「◯◯さんの投稿 - 」を前に付け、全ページ同一の「URA-POST.COM」よりは投稿ごとに
+# 差別化されたh1になるようにしている。
+DEFAULT_H1_TEXT = "広告視聴でコンテンツをアンロック"
+
 DEFAULT_PREMIUM_LINK = "https://fantia.jp/"
 DEFAULT_PREMIUM_BUTTON_TEXT = "【ファン限定】Fantia特設ページへ"
 MAX_BUTTON_TEXT_LENGTH = 60
@@ -2276,10 +2281,15 @@ class Handler(BaseHTTPRequestHandler):
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。
 
-        OGP画像・meta descriptionは、共有リンク(?v=<id>)が指している動画の情報が
+        OGP画像・meta description・h1は、共有リンク(?v=<id>)が指している動画の情報が
         あればそれを反映し、無ければサイト共通の既定値を差し込む。SNSのクローラーや
         検索エンジンはJSを実行しないため、この差し込みはHTMLを返すこのタイミングで
         サーバー側にやっておく必要がある。
+
+        h1については、投稿にタイトル/キャプションの概念が無いため「◯◯さんの投稿」が
+        表現できる限界。それでも全ページ固定の「URA-POST.COM」よりは投稿ごとの差別化に
+        なるため、ブランドロゴ自体は見た目そのままにh1タグからは外し、代わりに元々あった
+        サブタイトル部分をh1にしている(視覚的なレイアウトは変えていない)。
         """
         # ローカル変数名は"html"にしない(組み込みのhtmlモジュール(html.escape等)を
         # シャドーイングしてしまうため。他のテンプレート差し込み箇所と同じ命名規則)。
@@ -2289,6 +2299,7 @@ class Handler(BaseHTTPRequestHandler):
         requested_id = (query.get("v") or [None])[0]
         image_url = PUBLIC_SITE_URL + "/og-image"
         description = DEFAULT_META_DESCRIPTION
+        h1_text = DEFAULT_H1_TEXT
         if requested_id:
             video = find_video(requested_id)
             if video:
@@ -2302,9 +2313,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if owner_creator and owner_creator.get("display_name"):
                     description = owner_creator["display_name"] + "さんの投稿。" + DEFAULT_META_DESCRIPTION
+                    h1_text = owner_creator["display_name"] + "さんの投稿 - " + DEFAULT_H1_TEXT
 
         page_html = page_html.replace("{{OG_IMAGE_URL}}", image_url)
         page_html = page_html.replace("{{META_DESCRIPTION}}", html.escape(description))
+        page_html = page_html.replace("{{H1_TEXT}}", html.escape(h1_text))
         body = page_html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

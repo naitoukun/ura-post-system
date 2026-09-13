@@ -174,12 +174,14 @@
 
 <div class="w-full max-w-md mx-auto flex flex-col items-center gap-5 py-6">
 
-  <!-- タイトル -->
+  <!-- タイトル。全ページ共通の「URA-POST.COM」がh1だと投稿ごとの差別化が無くSEO上
+       もったいないため、見た目はそのままにブランドロゴをh1タグの外に出し、投稿者名を
+       反映できるサブタイトル側をh1にしている(handle_serve_unlock_page参照)。 -->
   <div class="flex flex-col items-center gap-1">
-    <h1 class="brand text-3xl sm:text-4xl text-slate-800 text-center whitespace-nowrap">
+    <p class="brand text-3xl sm:text-4xl text-slate-800 text-center whitespace-nowrap">
       URA-POST<span class="brand-accent">.COM</span>
-    </h1>
-    <p class="text-xs text-slate-400 tracking-wide">広告視聴でコンテンツをアンロック</p>
+    </p>
+    <h1 class="text-xs text-slate-400 tracking-wide font-normal">{{H1_TEXT}}</h1>
   </div>
 
   <!-- 期限切れエリア（24時間限定リンクが切れた場合） -->
@@ -281,6 +283,16 @@
       🗂️ この投稿者の投稿一覧を見る 🗂️
     </button>
 
+    <!-- サイト全体への導線。以前はこのページから他の投稿を回遊する手段が無かった
+         (内部リンク不足・離脱要因)ため追加。常時表示(特定の投稿者に限定しない)。 -->
+    <a
+      id="homeLinkBtn"
+      href="/"
+      class="btn-secondary-cta w-full text-center py-3.5 rounded-xl text-sm font-bold block"
+    >
+      🏠 他の投稿ももっと見る 🏠
+    </a>
+
     <!-- 視聴ページ(動画・画像共通)のバナー広告。PC/スマホでゾーンIDが異なるため、
          判定した方の<ins>だけをJS側で動的に生成する(両方を置いて片方をCSSで隠すと、
          隠した方にも広告リクエストが飛んでしまうため)。 -->
@@ -357,6 +369,7 @@
   const premiumLink = document.getElementById('premiumLink');
   const interestedBtn = document.getElementById('interestedBtn');
   const postListBtn = document.getElementById('postListBtn');
+  const homeLinkBtn = document.getElementById('homeLinkBtn');
   const contentPageAdWrap = document.getElementById('contentPageAdWrap');
   const adPageBannerWrap = document.getElementById('adPageBannerWrap');
   // PC/スマホの判定基準。Tailwindの md ブレークポイント(768px)に合わせる。
@@ -519,6 +532,7 @@
 
   premiumLink.addEventListener('click', () => track('premium_link_click'));
   interestedBtn.addEventListener('click', () => track('interested_click'));
+  homeLinkBtn.addEventListener('click', () => track('home_link_click'));
 
   // 24時間限定の残り時間を1秒ごとに更新表示する。0になったら「期限切れ」画面に切り替える。
   function startCountdown(expiresAtEpoch) {

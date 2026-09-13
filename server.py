@@ -2076,6 +2076,15 @@ class Handler(BaseHTTPRequestHandler):
             page_html = f.read()
         page_html = page_html.replace("{{CREATOR_ID_JSON}}", json_for_script(creator_id))
 
+        creator = find_creator(load_creators(), creator_id)
+        display_name = creator.get("display_name") if creator else None
+        description = (display_name + "さんの投稿一覧。" + DEFAULT_META_DESCRIPTION) if display_name else DEFAULT_META_DESCRIPTION
+        canonical_url = PUBLIC_SITE_URL + "/creator-posts/" + creator_id
+
+        page_html = page_html.replace("{{CREATOR_DISPLAY_NAME_JSON}}", json_for_script(display_name))
+        page_html = page_html.replace("{{META_DESCRIPTION}}", html.escape(description))
+        page_html = page_html.replace("{{CANONICAL_URL}}", html.escape(canonical_url))
+
         body = page_html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2300,6 +2309,7 @@ class Handler(BaseHTTPRequestHandler):
         image_url = PUBLIC_SITE_URL + "/og-image"
         description = DEFAULT_META_DESCRIPTION
         h1_text = DEFAULT_H1_TEXT
+        canonical_url = PUBLIC_SITE_URL + "/?v=" + requested_id if requested_id else PUBLIC_SITE_URL + "/"
         if requested_id:
             video = find_video(requested_id)
             if video:
@@ -2318,6 +2328,7 @@ class Handler(BaseHTTPRequestHandler):
         page_html = page_html.replace("{{OG_IMAGE_URL}}", image_url)
         page_html = page_html.replace("{{META_DESCRIPTION}}", html.escape(description))
         page_html = page_html.replace("{{H1_TEXT}}", html.escape(h1_text))
+        page_html = page_html.replace("{{CANONICAL_URL}}", html.escape(canonical_url))
         body = page_html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

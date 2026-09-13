@@ -10,6 +10,8 @@
      インデックスさせない(一般公開する段になったら外す想定)。 -->
 <meta name="robots" content="noindex, nofollow">
 <title>ura-post.com</title>
+<meta name="description" content="Xで活動する女の子を応援するサイト。限定画像・動画を広告視聴で無料アンロック。新着投稿・週間/月間ランキングをまとめてチェックできます。">
+<link rel="canonical" href="https://ura-post.com/">
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- 視聴ページ(index.html)と同じバナー広告用(ExoClick AdProvider) -->
 <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
@@ -223,6 +225,12 @@
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
   const PAGE_SIZE = 20;
 
+  // サムネイルのalt文言。画像検索等での発見可能性のため、分かる範囲で内容を説明する。
+  function describeThumb(item) {
+    const kind = item.contentType === 'image' ? '画像' : '動画';
+    return item.creatorDisplayName ? item.creatorDisplayName + 'さんの' + kind + '投稿' : kind + '投稿のサムネイル';
+  }
+
   // ピックアップ枠用の小さいサムネイル(コンテンツ種別バッジのみ、投稿者タグは省略してコンパクトに)
   function buildThumbLink(item) {
     const link = document.createElement('a');
@@ -233,7 +241,7 @@
     img.src = item.thumbnailUrl || '/og-image';
     img.loading = 'lazy';
     img.className = 'w-full h-full object-cover';
-    img.alt = '';
+    img.alt = describeThumb(item);
     link.appendChild(img);
 
     const badge = document.createElement('span');
@@ -338,7 +346,7 @@
     img.src = item.thumbnailUrl || '/og-image';
     img.loading = 'lazy';
     img.className = 'w-full h-full object-cover';
-    img.alt = '';
+    img.alt = describeThumb(item);
     link.appendChild(img);
 
     const badge = document.createElement('span');

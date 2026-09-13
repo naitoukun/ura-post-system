@@ -11,6 +11,9 @@
 <!-- 検索結果のスニペット用。共有リンク(?v=<id>)経由なら投稿者名入りの文言に、
      無ければ既定の説明文にサーバー側で差し替える(handle_serve_unlock_page参照)。 -->
 <meta name="description" content="{{META_DESCRIPTION}}">
+<!-- /index.html?v=X と /?v=X のように同じ投稿に複数の到達経路があるため、
+     投稿ごとの正規URL(/?v=X)を明示する(?v=無しの場合はサイトトップを指す)。 -->
+<link rel="canonical" href="{{CANONICAL_URL}}">
 <!-- アクセス解析(GA/GoatCounter)で投稿ごとに集計できるようにするための保険。
      このサイトはSPAで全投稿が同じ"/"を返す(?v=だけが違う)ため、タイトルが常に固定だと
      アクセス解析側で全投稿が1行にまとまってしまう。GAの自動pageview発火より前に、

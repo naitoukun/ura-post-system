@@ -8,6 +8,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>投稿一覧 | ura-post.com</title>
+<meta name="description" content="{{META_DESCRIPTION}}">
+<link rel="canonical" href="{{CANONICAL_URL}}">
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- 視聴ページ(index.html)と同じバナー広告用(ExoClick AdProvider) -->
 <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
@@ -93,6 +95,7 @@
   });
 
   const creatorId = {{CREATOR_ID_JSON}};
+  const creatorDisplayName = {{CREATOR_DISPLAY_NAME_JSON}};
   const loadingText = document.getElementById('loadingText');
   const emptyText = document.getElementById('emptyText');
   const postsGrid = document.getElementById('postsGrid');
@@ -131,8 +134,12 @@
 
         const img = document.createElement('img');
         img.src = item.thumbnailUrl || '/og-image';
+        img.loading = 'lazy';
         img.className = 'w-full h-full object-cover';
-        img.alt = '';
+        // サムネイルのalt文言。画像検索等での発見可能性のため、分かる範囲で内容を説明する。
+        img.alt = creatorDisplayName
+          ? creatorDisplayName + 'さんの' + (item.contentType === 'image' ? '画像' : '動画') + '投稿'
+          : (item.contentType === 'image' ? '画像' : '動画') + '投稿のサムネイル';
         link.appendChild(img);
 
         const badge = document.createElement('span');

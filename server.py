@@ -1633,10 +1633,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/creator-posts":
             self.handle_api_creator_posts(parse_qs(split.query))
         elif path == "/all-posts":
-            # サイト内のどこからもリンクしていない、現在公開中の投稿URL一覧ページ。
-            # URLを直接知っている人(管理者)だけが使う想定。
+            # 管理者専用の投稿URL一覧ページ。「どこからもリンクしていない」だけでは
+            # URLを知られた時点で誰でも見えてしまう(unlisted投稿や閲覧数の生データも
+            # 含むため)ため、他の管理者専用ページと同様にログイン必須にしてある。
+            if self.require_auth():
+                return
             self.serve_file(os.path.join(BASE_DIR, "all-posts.html"), "text/html; charset=utf-8")
         elif path == "/api/all-posts":
+            if self.require_auth():
+                return
             self.handle_api_all_posts()
         elif path == "/api/top-posts":
             # top.html(TOPページ)用のデータ。ページ自体を全訪問者に公開したのに合わせ、
@@ -2127,11 +2132,11 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def handle_api_all_posts(self):
-        """サイト全体で現在アクセス可能な投稿のURL一覧を返す(公開・認証不要)。
+        """サイト全体で現在アクセス可能な投稿のURL一覧を返す(管理者専用)。
 
         削除済み(実体ファイルが無い)・24時間限定で期限切れ・管理者が一時非公開に
-        した投稿は除外する。どのページからもリンクしていない(このURLを直接
-        知っている人だけが使う)想定。
+        した投稿は除外する。unlisted(投稿者が一覧非表示にした投稿)は除外しない・
+        閲覧数の生データも含むため、管理者専用ツールとして認証必須にしてある。
         """
         creators = load_creators()
         videos_list = load_videos()

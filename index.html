@@ -477,7 +477,16 @@
     return Boolean(adBlockBaitBlocked || window.__imaScriptBlocked || window.__adProviderScriptBlocked);
   }
 
+  // onAdError()はadsLoader/adsManagerの両方にAD_ERRORリスナーとして登録されており、かつ
+  // NO_AD_FALLBACK_WAIT_MS(3秒)とMAX_AD_WAIT_MS(25秒)の複数のタイマーが独立に
+  // handleNoAdAvailable()を呼びうる。ブロッカー検出時はonAdFinished()が呼ばれず
+  // adFinishedCalledが立たないため、対策無しだと同一視聴で何度も再表示・GAイベント
+  // 二重計上されてしまうのを防ぐフラグ。
+  let adBlockNoticeShown = false;
+
   function showAdBlockNotice() {
+    if (adBlockNoticeShown) return;
+    adBlockNoticeShown = true;
     track('adblock_detected');
     adLoadingState.classList.add('hidden-el');
     adBlockNotice.classList.remove('hidden-el');
@@ -543,9 +552,15 @@
     const expiresAtMs = expiresAtEpoch * 1000;
 
     const tick = () => {
+      // アンロック済みなら、視聴中に期限が来ても「期限切れ」画面を出さない
+      // (unlockedAreaの上に重ねて表示されてしまうため。念のためここでも止める)。
+      if (adFinishedCalled) {
+        clearInterval(countdownIntervalId);
+        return;
+      }
       const remainingMs = expiresAtMs - Date.now();
       if (remainingMs <= 0) {
-        clearInterval(intervalId);
+        clearInterval(countdownIntervalId);
         stopTeaserPreview();
         lockedArea.classList.add('hidden-el');
         expiredArea.classList.remove('hidden-el');
@@ -562,7 +577,7 @@
     };
 
     tick();
-    const intervalId = setInterval(tick, 1000);
+    countdownIntervalId = setInterval(tick, 1000);
   }
 
   unlockBtn.addEventListener('click', () => {
@@ -578,6 +593,10 @@
   // CONTENT_RESUME_REQUESTED / ALL_ADS_COMPLETED / エラー等、複数の経路から
   // 二重にonAdFinished()が呼ばれないようにするフラグ
   let adFinishedCalled = false;
+  // 24時間限定カウントダウンのsetIntervalハンドル。アンロック後もこれを止めないと、
+  // 視聴中にちょうど期限が来た瞬間、既にアンロック済みの動画の上に「期限切れ」画面が
+  // 表示されてしまう(unlockedAreaとexpiredAreaは排他関係ではないため)。
+  let countdownIntervalId = null;
 
   function setUpIma() {
     if (adsLoader || typeof google === 'undefined' || !google.ima) return;
@@ -705,6 +724,7 @@
   function onAdFinished() {
     if (adFinishedCalled) return;
     adFinishedCalled = true;
+    clearInterval(countdownIntervalId);
     overlay.classList.add('hidden-el');
     lockedArea.classList.add('hidden-el');
     unlockedArea.classList.remove('hidden-el');
@@ -712,6 +732,12 @@
     stopTeaserPreview();
 
     videoInfoPromise.then((info) => {
+      // 通常はlockedArea側で既に弾かれているはずだが(unlockBtnは/resolve-video解決前
+      // でもクリック可能なため)、極端に遅い回線でボタンを即座に押された場合の保険。
+      // これが無いと、info.urlがundefinedのまま<video>にセットされ「読み込み失敗」表示
+      // になったり、リンク切れ/期限切れ表示とunlockedAreaが同時に出たりしてしまう。
+      if (info.linkRequired || info.expired) return;
+
       track('content_unlocked', { content_type: info.contentType });
 
       // ポイント付与の判定基準になる有効視聴数は、ここ(実際にアンロックされた瞬間)で

@@ -2171,10 +2171,10 @@ class Handler(BaseHTTPRequestHandler):
     def handle_serve_sitemap(self):
         """検索エンジン向けのsitemap.xml(公開・認証不要)。
 
-        現時点ではTOPページ(/)自体がまだ管理者プレビュー段階(noindex)のため実質参照
-        されないが、一般公開する段になってすぐ使えるよう先に用意しておく。掲載するのは
-        現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・期限切れ・unlisted・
-        管理者による一時非公開は除外)。
+        TOPページ(/)自体は既に全訪問者に公開済みだが、投稿数がまだ少ないため
+        noindexにして検索エンジンへの露出はもう少し待っている段階(top.html参照)。
+        掲載するのは現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・
+        期限切れ・unlisted・管理者による一時非公開は除外)。
         """
         videos_list = load_videos()
         items = [

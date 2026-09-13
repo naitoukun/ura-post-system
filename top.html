@@ -177,7 +177,7 @@
   <!-- PCでは縦積みではなく3列グリッドにして、同じスクロール量でも見える投稿数を増やす -->
   <div id="postsGrid" class="flex flex-col gap-4 md:grid md:grid-cols-3"></div>
   <!-- 無限スクロール用の目印。これが画面内に入ったら次のページを読み込む -->
-  <div id="loadMoreSentinel" class="hidden-el text-center text-xs text-slate-400 py-2">読み込み中…</div>
+  <div id="loadMoreSentinel" class="invisible-el text-center text-xs text-slate-400 py-2">読み込み中…</div>
 
   <!-- フッター（サイト実態と一致する表記。index.htmlと同じもの） -->
   <footer class="mt-4 text-center text-[11px] text-gray-400">
@@ -394,7 +394,7 @@
   function loadNextPage() {
     if (isLoading || !hasMore) return;
     isLoading = true;
-    loadMoreSentinel.classList.remove('hidden-el');
+    loadMoreSentinel.classList.remove('invisible-el');
 
     fetch('/api/top-posts?' + buildQueryString(), { cache: 'no-store' })
       .then((res) => res.json())
@@ -425,14 +425,16 @@
         offset += items.length;
         hasMore = Boolean(data && data.hasMore);
         isLoading = false;
-        loadMoreSentinel.classList.add('hidden-el');
+        loadMoreSentinel.classList.add('invisible-el');
         if (!hasMore) {
+          // 監視対象を外すので、レイアウト上に残しておく理由も無くなる
+          loadMoreSentinel.classList.add('hidden-el');
           observer.disconnect();
         }
       })
       .catch(() => {
         loadingText.classList.add('hidden-el');
-        loadMoreSentinel.classList.add('hidden-el');
+        loadMoreSentinel.classList.add('invisible-el');
         isLoading = false;
         if (offset === 0) emptyText.classList.remove('hidden-el');
       });
@@ -461,6 +463,9 @@
     loadingText.classList.remove('hidden-el');
     feedHeading.textContent = isFiltered ? '🔍 検索結果 🔍' : '🆕 新着 🆕';
 
+    // 前回「これ以上無い」まで読み込み切ってhidden-elが付いたままだと、監視を再開しても
+    // 要素がdisplay:noneのままではIntersectionObserverが二度と交差を検知できない。
+    loadMoreSentinel.classList.remove('hidden-el');
     observer.observe(loadMoreSentinel); // disconnect()済みでも再度呼べば復帰する
     loadNextPage();
   }
@@ -490,6 +495,10 @@
 
 <style>
   .hidden-el{ display:none !important; }
+  /* display:noneだとレイアウト上の実体が消え、IntersectionObserverが二度と交差を
+     検知できなくなる(無限スクロールの目印用途に不向き)。読み込み中表示の
+     出し引きにはこちらを使い、要素自体はレイアウトに残しておく。 */
+  .invisible-el{ visibility:hidden; }
 </style>
 
 </body>

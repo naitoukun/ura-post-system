@@ -2273,6 +2273,10 @@ class Handler(BaseHTTPRequestHandler):
         serialized = [
             {
                 "id": v["id"],
+                # 外部サイトの自動連携等、idから自分でURLを組み立てる手間を省くための
+                # 利便フィールド(/api/all-postsと同じ形式)。中身はidと同じ情報なので、
+                # 既存の消費側(top.html等)に影響は無い追加のみの変更。
+                "url": PUBLIC_SITE_URL + "/?v=" + v["id"],
                 "contentType": v.get("content_type", "video"),
                 "thumbnailUrl": ("/thumb/" + v["id"]) if v.get("og_image_filename") else None,
                 "uploadedAt": v.get("uploaded_at"),

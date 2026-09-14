@@ -34,6 +34,15 @@
     background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
     color:#ffffff;
   }
+  /* 「気になる」「トップに戻る」用。視聴ページ(index.html)と同じ見た目にしてある。 */
+  .btn-secondary-cta{
+    background:linear-gradient(180deg,var(--accent-teal),var(--accent-teal-dark));
+    color:#ffffff;
+    box-shadow:0 4px 14px rgba(74,157,144,0.3);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn-secondary-cta:active{ transform:scale(0.98); }
+  .btn-secondary-cta:hover{ box-shadow:0 6px 18px rgba(74,157,144,0.4); }
   .brand{
     font-family:'Outfit','Noto Sans JP',sans-serif;
     font-weight:800;
@@ -68,6 +77,28 @@
     <p class="text-xs text-slate-400 mt-1">この投稿者の投稿一覧</p>
   </div>
 
+  <!-- 視聴ページの「この投稿者の投稿一覧を見る」から来た場合、このページに戻る/他へ移動する
+       手段が無いと行き止まりになるため追加。一覧(postsGrid)が長くなっても迷わないよう、
+       スクロールしなくて済む位置(グリッドより上)に置く。 -->
+  <div class="flex flex-col gap-2">
+    <a
+      id="interestedBtn"
+      href="#"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="hidden-el btn-secondary-cta w-full text-center py-3 rounded-xl text-sm font-bold block"
+    >
+      👀 この子が気になる 👀
+    </a>
+    <a
+      id="homeLinkBtn"
+      href="/"
+      class="btn-secondary-cta w-full text-center py-3 rounded-xl text-sm font-bold block"
+    >
+      🏠 他の投稿ももっと見る 🏠
+    </a>
+  </div>
+
   <!-- 視聴ページと同じバナー広告。PC/スマホでゾーンID・タグが異なるため、判定した方の
        <ins>だけを生成する(index.html/top.htmlと同じ方式)。 -->
   <div id="creatorPostsAdWrap" class="hidden-el w-full flex justify-center"></div>
@@ -96,11 +127,20 @@
 
   const creatorId = {{CREATOR_ID_JSON}};
   const creatorDisplayName = {{CREATOR_DISPLAY_NAME_JSON}};
+  const creatorContactUrl = {{CREATOR_CONTACT_URL_JSON}};
   const loadingText = document.getElementById('loadingText');
   const emptyText = document.getElementById('emptyText');
   const postsGrid = document.getElementById('postsGrid');
   const creatorPostsAdWrap = document.getElementById('creatorPostsAdWrap');
+  const interestedBtn = document.getElementById('interestedBtn');
   const CONTENT_PAGE_AD_DESKTOP_QUERY = '(min-width: 768px)';
+
+  // 投稿者の連絡先URL(SNS等)が設定されている場合のみ「気になる」ボタンを表示する
+  // (視聴ページのinterestedBtnと同じ扱い)。
+  if (creatorContactUrl) {
+    interestedBtn.href = creatorContactUrl;
+    interestedBtn.classList.remove('hidden-el');
+  }
 
   fetch('/site-config', { cache: 'no-store' })
     .then((res) => res.json())

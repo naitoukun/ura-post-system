@@ -2105,7 +2105,10 @@ class Handler(BaseHTTPRequestHandler):
         description = (display_name + "さんの投稿一覧。" + DEFAULT_META_DESCRIPTION) if display_name else DEFAULT_META_DESCRIPTION
         canonical_url = PUBLIC_SITE_URL + "/creator-posts/" + creator_id
 
+        contact_url = creator.get("contact_url") if creator else None
+
         page_html = page_html.replace("{{CREATOR_DISPLAY_NAME_JSON}}", json_for_script(display_name))
+        page_html = page_html.replace("{{CREATOR_CONTACT_URL_JSON}}", json_for_script(contact_url))
         page_html = page_html.replace("{{META_DESCRIPTION}}", html.escape(description))
         page_html = page_html.replace("{{CANONICAL_URL}}", html.escape(canonical_url))
 

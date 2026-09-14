@@ -114,9 +114,11 @@ import smtplib
 import struct
 import threading
 import time
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, urlencode
 
 from PIL import Image, ImageOps
 
@@ -138,6 +140,15 @@ CONFIG_PATH = os.path.join(UPLOAD_DIR, "config.json")
 UPLOAD_PASSPHRASE = os.environ.get("UPLOAD_PASSPHRASE", "change-me-please")
 # ローカル確認用のダミー秘密鍵。Google Authenticator等に手入力で登録して試せる。
 TOTP_SECRET = os.environ.get("TOTP_SECRET", "TUGSIULMQWTNMATI")
+
+# 管理画面のGoogleログイン(パスフレーズ+TOTPに加えた、もう一つの追加ログイン手段)。
+# 3つとも未設定なら機能自体を無効にする(自分1人だけが使う想定のオプション機能のため、
+# 必須にはしていない)。ADMIN_GOOGLE_EMAILは、Googleでログインしてきたアカウントの
+# メールアドレスがこれと完全一致した場合のみ管理セッションを発行する許可リスト。
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+ADMIN_GOOGLE_EMAIL = os.environ.get("ADMIN_GOOGLE_EMAIL", "")
+GOOGLE_LOGIN_ENABLED = bool(GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET and ADMIN_GOOGLE_EMAIL)
 
 # クリエイターの生年月日(年齢確認の承認後も保持する個人情報)を暗号化して保存するための鍵。
 # 本番ではVPSの環境変数 PII_ENCRYPTION_KEY で上書きすること(systemdのEnvironment=で設定済み)。
@@ -164,6 +175,11 @@ def decrypt_pii(token):
 
 SESSION_COOKIE_NAME = "sv_session"
 SESSION_DURATION_SECONDS = 4 * 60 * 60  # 4時間
+
+# GoogleログインのCSRF対策用(state)。認可画面に飛ばす直前だけ短時間Cookieに積んでおき、
+# Googleからのcallbackで一致するか確認する。管理セッション本体のCookieとは別物。
+GOOGLE_OAUTH_STATE_COOKIE_NAME = "sv_google_oauth_state"
+GOOGLE_OAUTH_STATE_TTL_SECONDS = 10 * 60  # 10分(認可画面での操作時間を考慮した余裕)
 # 単一プロセス前提のシンプルな実装のため、セッションはメモリ上にのみ保持する
 # （サーバー再起動でログイン状態はリセットされる）。
 SESSIONS = {}
@@ -1633,6 +1649,10 @@ class Handler(BaseHTTPRequestHandler):
             # サーバーの実際のTOTP_SECRETはここでは一切扱わない。
             # 入力された値をブラウザ内だけでQRコード化する単なるツール。
             self.serve_file(os.path.join(BASE_DIR, "admin-totp-setup.html"), "text/html; charset=utf-8")
+        elif path == "/admin/google-login":
+            self.handle_admin_google_login()
+        elif path == "/admin/google-callback":
+            self.handle_admin_google_callback(parse_qs(split.query))
         elif path == "/video-merge-tool":
             # クリエイターに渡す用の動画結合ツール。処理はブラウザ内(ffmpeg.wasm)で完結し、
             # 動画はサーバーに一切送信されないため、ログイン不要で誰でも使える。
@@ -2646,6 +2666,104 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def handle_admin_google_login(self):
+        """管理画面のGoogleログイン開始。Googleの認可画面にリダイレクトする。
+
+        パスフレーズ+TOTPに加えた、もう一つの追加ログイン手段(自分1人だけが使う想定)。
+        GOOGLE_LOGIN_ENABLEDがFalse(未設定)なら使えない。
+        """
+        if not GOOGLE_LOGIN_ENABLED:
+            self.send_error(503, "Google login is not configured")
+            return
+
+        state = secrets.token_urlsafe(24)
+        auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
+            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+            "redirect_uri": PUBLIC_SITE_URL + "/admin/google-callback",
+            "response_type": "code",
+            "scope": "openid email",
+            "state": state,
+            "prompt": "select_account",
+        })
+
+        self.send_response(302)
+        self.send_header("Location", auth_url)
+        # callbackはGoogleからのクロスサイト・トップレベル遷移で戻ってくるため、
+        # 管理セッション本体のCookie(SameSite=Strict)とは別に、ここだけSameSite=Laxにする。
+        self.send_header(
+            "Set-Cookie",
+            f"{GOOGLE_OAUTH_STATE_COOKIE_NAME}={state}; Path=/admin/google-callback; "
+            f"HttpOnly; Secure; SameSite=Lax; Max-Age={GOOGLE_OAUTH_STATE_TTL_SECONDS}",
+        )
+        self.end_headers()
+
+    def handle_admin_google_callback(self, query):
+        """Googleの認可画面からのcallback。コード交換→本人のメールアドレス確認まで行う。
+
+        許可されているのはADMIN_GOOGLE_EMAILと完全一致するメールアドレスのGoogleアカウント
+        のみ。それ以外(誰か他のGoogleアカウントでログインを試みた等)は拒否し、
+        パスフレーズ+TOTPの場合と同様セッションは発行しない。
+        """
+        if not GOOGLE_LOGIN_ENABLED:
+            self.send_error(503, "Google login is not configured")
+            return
+
+        if (query.get("error") or [None])[0]:
+            self.send_error(403, "Google login was cancelled or failed")
+            return
+
+        code = (query.get("code") or [None])[0]
+        returned_state = (query.get("state") or [None])[0]
+        expected_state = parse_cookies(self.headers.get("Cookie")).get(GOOGLE_OAUTH_STATE_COOKIE_NAME)
+        if not code or not returned_state or not expected_state or not hmac.compare_digest(returned_state, expected_state):
+            self.send_error(400, "Invalid or expired Google login attempt")
+            return
+
+        try:
+            token_body = urlencode({
+                "code": code,
+                "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                "redirect_uri": PUBLIC_SITE_URL + "/admin/google-callback",
+                "grant_type": "authorization_code",
+            }).encode("utf-8")
+            token_req = urllib.request.Request(
+                "https://oauth2.googleapis.com/token",
+                data=token_body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with urllib.request.urlopen(token_req, timeout=10) as resp:
+                access_token = json.loads(resp.read().decode("utf-8")).get("access_token")
+            if not access_token:
+                raise ValueError("no access_token in Google's response")
+
+            userinfo_req = urllib.request.Request(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": "Bearer " + access_token},
+            )
+            with urllib.request.urlopen(userinfo_req, timeout=10) as resp:
+                userinfo = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, ValueError, TimeoutError, json.JSONDecodeError):
+            self.send_error(502, "Failed to verify Google login")
+            return
+
+        email = (userinfo.get("email") or "").strip().lower()
+        if not userinfo.get("email_verified") or not email or not hmac.compare_digest(email, ADMIN_GOOGLE_EMAIL.strip().lower()):
+            self.send_error(403, "This Google account is not authorized for admin access")
+            return
+
+        token = self.create_session()
+        self.send_response(302)
+        self.send_header("Location", "/admin")
+        self.set_session_cookie(token)
+        # 使い終わったstate用Cookieは消しておく
+        self.send_header(
+            "Set-Cookie",
+            f"{GOOGLE_OAUTH_STATE_COOKIE_NAME}=; Path=/admin/google-callback; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+        )
+        self.end_headers()
 
     def handle_set_premium_link(self):
         content_length = int(self.headers.get("Content-Length", 0))

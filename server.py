@@ -676,6 +676,21 @@ def find_creator(creators, creator_id):
     return next((c for c in creators if c["id"] == creator_id), None)
 
 
+def is_creator_content_visible(owner_creator_id, creators):
+    """投稿を一般公開してよいかどうか。
+
+    クリエイターはアップロード自体は身分証確認前でも可能だが、公開(配信・一覧・
+    sitemap・OGP等あらゆる場所)は所有者の身分証が承認されるまで行わない。
+    投稿ごとに「審査待ち」フラグを持たせるのではなく、所有者の現在の承認状態を
+    都度見る設計なので、承認された瞬間にそれまでの投稿がまとめて公開対象になる。
+    管理者本人のアップロード(owner_creator_id無し)には適用しない。
+    """
+    if not owner_creator_id:
+        return True
+    owner = find_creator(creators, owner_creator_id)
+    return bool(owner and owner.get("id_verification_status") == "approved")
+
+
 def build_pickup(serialized, creators):
     """TOPページの「ピックアップ」枠を組み立てる。
 
@@ -724,6 +739,7 @@ def compute_top_og_image_url():
         and not v.get("unlisted")
         and not v.get("suspended")
         and v.get("og_image_filename")
+        and is_creator_content_visible(v.get("owner_creator_id"), creators)
     ]
     if not eligible:
         return PUBLIC_SITE_URL + "/og-image"
@@ -1823,10 +1839,15 @@ class Handler(BaseHTTPRequestHandler):
         with VIDEOS_LOCK:
             videos_list = load_videos()
             video = next((v for v in videos_list if v["id"] == requested_id), None)
-            if not video or not video_file_path(video) or video.get("suspended"):
-                # 削除済み・存在しないID・管理者が一時非公開にしたIDへのアクセスは
-                # すべて「期限切れ」と同じ画面に統一する(手動削除/自然な期限切れ/
-                # モデレーションによる非公開のどれなのかを外部から区別させないため)。
+            if (
+                not video
+                or not video_file_path(video)
+                or video.get("suspended")
+                or not is_creator_content_visible(video.get("owner_creator_id"), load_creators())
+            ):
+                # 削除済み・存在しないID・管理者が一時非公開にしたID・投稿者の身分証が
+                # まだ未承認のIDへのアクセスは、すべて「期限切れ」と同じ画面に統一する
+                # (理由を外部から区別させないため)。
                 self.respond_json(200, {"expired": True})
                 return
 
@@ -1934,7 +1955,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404, "Video not found")
                 return
             path = video_file_path(video) if video else None
-            if not path or video.get("suspended"):
+            if not path or video.get("suspended") or not is_creator_content_visible(video.get("owner_creator_id"), load_creators()):
                 self.send_error(404, "Video not found")
                 return
 
@@ -2017,7 +2038,12 @@ class Handler(BaseHTTPRequestHandler):
         with VIDEOS_LOCK:
             videos_list = load_videos()
             video = next((v for v in videos_list if v["id"] == video_id), None)
-            if not video or video.get("content_type") != "image" or video.get("suspended"):
+            if (
+                not video
+                or video.get("content_type") != "image"
+                or video.get("suspended")
+                or not is_creator_content_visible(video.get("owner_creator_id"), load_creators())
+            ):
                 self.send_error(404, "Not Found")
                 return
 
@@ -2068,7 +2094,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_serve_thumbnail(self, video_id):
         video = find_video(video_id)
-        filename = video.get("og_image_filename") if video and not video.get("suspended") else None
+        visible = (
+            video
+            and not video.get("suspended")
+            and is_creator_content_visible(video.get("owner_creator_id"), load_creators())
+        )
+        filename = video.get("og_image_filename") if visible else None
         if not filename:
             self.send_error(404, "Not Found")
             return
@@ -2162,6 +2193,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(200, {"items": []})
             return
 
+        creators = load_creators()
         videos_list = load_videos()
         items = [
             v for v in videos_list
@@ -2170,6 +2202,7 @@ class Handler(BaseHTTPRequestHandler):
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
             and not v.get("suspended")
+            and is_creator_content_visible(v.get("owner_creator_id"), creators)
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -2198,6 +2231,7 @@ class Handler(BaseHTTPRequestHandler):
             if video_file_path(v)
             and not get_time_limit_status(v)["expired"]
             and not v.get("suspended")
+            and is_creator_content_visible(v.get("owner_creator_id"), creators)
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -2228,6 +2262,7 @@ class Handler(BaseHTTPRequestHandler):
         掲載するのは現在アクセス可能な投稿の個別URL(/?v=<id>)のみ(削除済み・
         期限切れ・unlisted・管理者による一時非公開は除外)。
         """
+        creators = load_creators()
         videos_list = load_videos()
         items = [
             v for v in videos_list
@@ -2235,6 +2270,7 @@ class Handler(BaseHTTPRequestHandler):
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
             and not v.get("suspended")
+            and is_creator_content_visible(v.get("owner_creator_id"), creators)
         ]
         items.sort(key=lambda v: v.get("uploaded_at", ""), reverse=True)
 
@@ -2299,6 +2335,7 @@ class Handler(BaseHTTPRequestHandler):
             and not get_time_limit_status(v)["expired"]
             and not v.get("unlisted")
             and not v.get("suspended")
+            and is_creator_content_visible(v.get("owner_creator_id"), creators)
         ]
 
         serialized = [
@@ -3075,11 +3112,14 @@ class Handler(BaseHTTPRequestHandler):
         (クライアントが送ってきた値をそのまま信用してはいけない)。
         """
         if owner_creator_id:
-            # 年齢確認(身分証提出→管理者承認)が済むまでは、クリエイターのセルフアップロードを禁止する。
-            # 管理者本人のアップロード(owner_creator_id無し)には適用しない。
+            # 以前は年齢確認(身分証提出→管理者承認)が済むまでアップロード自体を禁止していたが、
+            # 登録直後にいきなり審査待ちの壁にぶつかる体験を無くすため、アップロード自体は
+            # 未承認でも可能にした。ただし承認されるまでは一般には一切公開されない
+            # (is_creator_content_visible参照。resolve-video・各種配信・一覧API・sitemap等、
+            # 公開に関わる箇所すべてで所有者の承認状態を都度チェックしている)。
             creator = find_creator(load_creators(), owner_creator_id)
-            if not creator or creator.get("id_verification_status") != "approved":
-                self.respond_json(403, {"ok": False, "error": "id_verification_required"})
+            if not creator:
+                self.respond_json(404, {"ok": False, "error": "not_found"})
                 return
 
         content_type_header = self.headers.get("Content-Type", "")

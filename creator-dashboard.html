@@ -99,7 +99,7 @@
     <p id="idVerificationStatusText" class="text-sm">-</p>
     <div id="idVerificationSubmitWrap" class="hidden flex flex-col gap-2">
       <p class="text-xs text-slate-400">
-        運転免許証・パスポート等、生年月日と顔写真が確認できる身分証の画像（またはPDF）をアップロードしてください。承認されるまでコンテンツのアップロードはできません。
+        運転免許証・パスポート等、生年月日と顔写真が確認できる身分証の画像（またはPDF）をアップロードしてください。承認されるまで投稿は一般には公開されません（アップロード自体は可能です）。
       </p>
       <label class="flex flex-col gap-1">
         <span class="text-xs text-slate-500">身分証の種類</span>
@@ -138,11 +138,13 @@
     <div id="redemptionHistoryBox" class="flex flex-col gap-1"></div>
   </form>
 
-  <p id="uploadBlockedMsg" class="hidden card rounded-2xl p-4 text-sm text-rose-500">
-    アップロードには身分証の承認が必要です。上の「年齢確認」から提出してください。
+  <!-- 身分証未承認でもアップロード自体は可能(下のuploadFormは常時表示)。ただし承認されるまで
+       一般には一切公開されないため、その旨をここで注意喚起する(ブロックはしない)。 -->
+  <p id="uploadBlockedMsg" class="hidden card rounded-2xl p-4 text-sm text-amber-600">
+    身分証が未承認の間もアップロードはできますが、承認されるまで投稿は一般に公開されません（あなた以外には見えません）。
   </p>
 
-  <form id="uploadForm" class="hidden card rounded-2xl p-4 flex flex-col gap-4">
+  <form id="uploadForm" class="card rounded-2xl p-4 flex flex-col gap-4">
     <div class="flex flex-col gap-1">
       <span class="text-sm font-medium text-slate-700">コンテンツの種類</span>
       <div class="flex gap-4">
@@ -225,6 +227,10 @@
   const pointsBalanceText = document.getElementById('pointsBalanceText');
   const pointsYenText = document.getElementById('pointsYenText');
   const uploadBlockedMsg = document.getElementById('uploadBlockedMsg');
+
+  // buildContentCardで「未承認の間は非公開」バッジを出すために、直近取得した状態を保持しておく。
+  // 未取得(null)の間はまだ何も分からないので、バッジは出さない(誤って出さないほうを優先)。
+  let currentIdVerificationStatus = null;
 
   const idVerificationStatusText = document.getElementById('idVerificationStatusText');
   const idVerificationSubmitWrap = document.getElementById('idVerificationSubmitWrap');
@@ -362,9 +368,10 @@
 
   function updateIdVerificationUI(status, rejectionReason) {
     const isApproved = status === 'approved';
+    currentIdVerificationStatus = status;
 
     if (status === 'approved') {
-      idVerificationStatusText.textContent = '確認済みです。コンテンツをアップロードできます。';
+      idVerificationStatusText.textContent = '確認済みです。投稿は一般に公開されます。';
       idVerificationStatusText.className = 'text-sm text-teal-600';
       idVerificationSubmitWrap.classList.add('hidden');
     } else if (status === 'pending') {
@@ -376,12 +383,13 @@
       idVerificationStatusText.className = 'text-sm text-rose-500';
       idVerificationSubmitWrap.classList.remove('hidden');
     } else {
-      idVerificationStatusText.textContent = '身分証が未提出です。承認されるまでコンテンツはアップロードできません。';
+      idVerificationStatusText.textContent = '身分証が未提出です。';
       idVerificationStatusText.className = 'text-sm text-slate-500';
       idVerificationSubmitWrap.classList.remove('hidden');
     }
 
-    uploadForm.classList.toggle('hidden', !isApproved);
+    // アップロード自体は身分証の承認状態に関わらず常に可能(uploadFormは常時表示)。
+    // 未承認の間は代わりにuploadBlockedMsgで「公開はまだ」という注意だけ出す。
     uploadBlockedMsg.classList.toggle('hidden', isApproved);
   }
 
@@ -575,6 +583,11 @@
     }
     if (item.unlisted) {
       addBadge('限定公開（一覧非表示）', 'bg-amber-50 text-amber-700');
+    }
+    // 身分証が未承認の間は、この投稿者の投稿は全て非公開(サーバー側で一律ブロック)。
+    // 個別の投稿ごとの状態ではなく、アカウント全体の承認状態で決まる。
+    if (currentIdVerificationStatus && currentIdVerificationStatus !== 'approved') {
+      addBadge('非公開（身分証確認待ち）', 'bg-rose-50 text-rose-600');
     }
     addBadge('有効視聴回数: ' + (item.viewCount || 0), 'bg-slate-100 text-slate-500');
     addBadge('総アクセス数: ' + (item.rawViewCount || 0), 'bg-slate-100 text-slate-500');
@@ -1221,27 +1234,9 @@
   }
 
   function refreshContentList() {
-    fetch('/api/creator/content', { cache: 'no-store' })
-      .then((res) => res.json().then((data) => ({ status: res.status, data })))
-      .then(({ status, data }) => {
-        if (redirectIfUnauthenticated(status)) return;
-        const items = Array.isArray(data) ? data : [];
-
-        if (!items.length) {
-          contentListBox.innerHTML =
-            '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだアップロードされていません。</div>';
-        } else {
-          contentListBox.innerHTML = '';
-          items.forEach((item) => {
-            contentListBox.appendChild(buildContentCard(item));
-          });
-        }
-      })
-      .catch(() => {
-        contentListBox.innerHTML =
-          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
-      });
-
+    // buildContentCardが身分証の承認状態(currentIdVerificationStatus)を見てバッジを
+    // 出し分けるため、投稿一覧より先にcreators/meを取得して状態を確定させてから
+    // 一覧を描画する(逆順だと初回表示でバッジが出ないことがある)。
     fetch('/api/creators/me', { cache: 'no-store' })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
       .then(({ status, data }) => {
@@ -1263,7 +1258,29 @@
           updateIdVerificationUI(data.idVerificationStatus, data.idRejectionReason);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .then(() => {
+        fetch('/api/creator/content', { cache: 'no-store' })
+          .then((res) => res.json().then((data) => ({ status: res.status, data })))
+          .then(({ status, data }) => {
+            if (redirectIfUnauthenticated(status)) return;
+            const items = Array.isArray(data) ? data : [];
+
+            if (!items.length) {
+              contentListBox.innerHTML =
+                '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだアップロードされていません。</div>';
+            } else {
+              contentListBox.innerHTML = '';
+              items.forEach((item) => {
+                contentListBox.appendChild(buildContentCard(item));
+              });
+            }
+          })
+          .catch(() => {
+            contentListBox.innerHTML =
+              '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+          });
+      });
   }
 
   displayNameSaveBtn.addEventListener('click', () => {

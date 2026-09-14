@@ -254,9 +254,12 @@
     img.alt = describeThumb(item);
     link.appendChild(img);
 
+    // 画像/動画で背景色を変え、テキストを読まなくても種別が一目で分かるようにする。
     const badge = document.createElement('span');
-    badge.className = 'absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
-    badge.textContent = item.contentType === 'image' ? '画像' : '動画';
+    const isImage = item.contentType === 'image';
+    badge.className = 'absolute bottom-1 right-1 text-white text-[10px] px-1.5 py-0.5 rounded '
+      + (isImage ? 'bg-pink-600/80' : 'bg-blue-600/80');
+    badge.textContent = isImage ? '画像' : '動画';
     link.appendChild(badge);
 
     return link;
@@ -360,8 +363,10 @@
     link.appendChild(img);
 
     const badge = document.createElement('span');
-    badge.className = 'absolute bottom-1.5 right-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded';
-    badge.textContent = item.contentType === 'image' ? '画像' : '動画';
+    const isImage = item.contentType === 'image';
+    badge.className = 'absolute bottom-1.5 right-1.5 text-white text-[10px] px-1.5 py-0.5 rounded '
+      + (isImage ? 'bg-pink-600/80' : 'bg-blue-600/80');
+    badge.textContent = isImage ? '画像' : '動画';
     link.appendChild(badge);
 
     card.appendChild(link);

@@ -706,6 +706,37 @@ def build_pickup(serialized, creators):
     return featured_items
 
 
+def compute_top_og_image_url():
+    """TOPページ(top.html)のOGP画像URLを決める。
+
+    ピックアップ固定表示の投稿者がいれば、その中から最新投稿のサムネイルを使う
+    (build_pickupと同じ母集団の絞り込み)。SNSのクローラーがURLごとに結果をキャッシュ
+    する性質上、build_pickupのような毎回無作為の抽選ではなく「最新」で決定的に選ぶ
+    (呼ばれるたびに変わると、どのタイミングでクロールされたかでカードの画像が
+    ばらついてしまうため)。対象が無ければサイト共通の既定画像にフォールバックする。
+    """
+    creators = load_creators()
+    videos_list = load_videos()
+    eligible = [
+        v for v in videos_list
+        if video_file_path(v)
+        and not get_time_limit_status(v)["expired"]
+        and not v.get("unlisted")
+        and not v.get("suspended")
+        and v.get("og_image_filename")
+    ]
+    if not eligible:
+        return PUBLIC_SITE_URL + "/og-image"
+
+    featured_ids = {c["id"] for c in creators if c.get("pickup_featured")}
+    pool = [v for v in eligible if v.get("owner_creator_id") in featured_ids] if featured_ids else eligible
+    if not pool:
+        pool = eligible
+
+    pool.sort(key=lambda v: v.get("uploaded_at") or "", reverse=True)
+    return PUBLIC_SITE_URL + "/thumb/" + pool[0]["id"]
+
+
 def find_creator_by_login_code(creators, login_code):
     return next((c for c in creators if c.get("login_code") == login_code and c.get("status") == "active"), None)
 
@@ -1587,7 +1618,7 @@ class Handler(BaseHTTPRequestHandler):
             # 検索エンジンへの露出(noindex解除)も2026-09-13に解禁済み(top.html参照)。
             query = parse_qs(split.query)
             if not query.get("v"):
-                self.serve_file(os.path.join(BASE_DIR, "top.html"), "text/html; charset=utf-8")
+                self.handle_serve_top_page()
             else:
                 self.handle_serve_unlock_page(query)
         elif path == "/index.html":
@@ -2314,6 +2345,18 @@ class Handler(BaseHTTPRequestHandler):
             response["monthlyRanking"] = monthly_ranking
 
         self.respond_json(200, response)
+
+    def handle_serve_top_page(self):
+        """TOPページ(top.html)を返す。OGP画像だけcompute_top_og_image_urlで動的に決める。"""
+        with open(os.path.join(BASE_DIR, "top.html"), "r", encoding="utf-8") as f:
+            page_html = f.read()
+        page_html = page_html.replace("{{OG_IMAGE_URL}}", html.escape(compute_top_og_image_url()))
+        body = page_html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_serve_unlock_page(self, query):
         """動画アンロックページ(index.html)を返す。

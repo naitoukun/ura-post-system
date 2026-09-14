@@ -10,17 +10,18 @@
 <title>ura-post.com</title>
 <meta name="description" content="Xで活動する女の子を応援するサイト。限定画像・動画を広告視聴で無料アンロック。新着投稿・週間/月間ランキングをまとめてチェックできます。">
 <link rel="canonical" href="https://ura-post.com/">
-<!-- SNSシェア時のリンクカード用。このページは特定の投稿ではなく一覧ページなので、
-     index.html(投稿ごとに動的差し替え)と違ってサイト共通の既定画像を静的に埋め込む。 -->
+<!-- SNSシェア時のリンクカード用。ピックアップ固定表示の投稿者がいればその最新投稿の
+     サムネイル、いなければ全体の最新投稿、対象が無ければサイト共通の既定画像
+     (handle_serve_top_pageのOG_IMAGE_URL参照)。 -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="ura-post.com">
 <meta property="og:description" content="Xで活動する女の子を応援するサイト。限定画像・動画を広告視聴で無料アンロック。新着投稿・週間/月間ランキングをまとめてチェックできます。">
-<meta property="og:image" content="https://ura-post.com/og-image">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
 <meta property="og:url" content="https://ura-post.com/">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ura-post.com">
 <meta name="twitter:description" content="Xで活動する女の子を応援するサイト。限定画像・動画を広告視聴で無料アンロック。新着投稿・週間/月間ランキングをまとめてチェックできます。">
-<meta name="twitter:image" content="https://ura-post.com/og-image">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- 視聴ページ(index.html)と同じバナー広告用(ExoClick AdProvider) -->
 <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>

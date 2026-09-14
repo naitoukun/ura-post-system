@@ -77,9 +77,16 @@
     <p class="text-xs text-slate-400 mt-1">この投稿者の投稿一覧</p>
   </div>
 
+  <!-- 視聴ページと同じバナー広告。PC/スマホでゾーンID・タグが異なるため、判定した方の
+       <ins>だけを生成する(index.html/top.htmlと同じ方式)。 -->
+  <div id="creatorPostsAdWrap" class="hidden-el w-full flex justify-center"></div>
+
+  <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
+  <div id="emptyText" class="hidden-el text-sm text-slate-400">投稿が見つかりませんでした。</div>
+  <div id="postsGrid" class="grid grid-cols-3 gap-2"></div>
+
   <!-- 視聴ページの「この投稿者の投稿一覧を見る」から来た場合、このページに戻る/他へ移動する
-       手段が無いと行き止まりになるため追加。一覧(postsGrid)が長くなっても迷わないよう、
-       スクロールしなくて済む位置(グリッドより上)に置く。 -->
+       手段が無いと行き止まりになるため追加。一覧を見終えた後の導線として下部に置く。 -->
   <div class="flex flex-col gap-2">
     <a
       id="interestedBtn"
@@ -99,13 +106,16 @@
     </a>
   </div>
 
-  <!-- 視聴ページと同じバナー広告。PC/スマホでゾーンID・タグが異なるため、判定した方の
-       <ins>だけを生成する(index.html/top.htmlと同じ方式)。 -->
-  <div id="creatorPostsAdWrap" class="hidden-el w-full flex justify-center"></div>
-
-  <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
-  <div id="emptyText" class="hidden-el text-sm text-slate-400">投稿が見つかりませんでした。</div>
-  <div id="postsGrid" class="grid grid-cols-3 gap-2"></div>
+  <!-- フッター(サイト実態と一致する表記。index.html/top.htmlと同じもの) -->
+  <footer class="mt-4 text-center text-[11px] text-gray-400">
+    <p>当サイトは動画広告視聴型のリワードコンテンツゲートです。</p>
+    <p>
+      <a href="/terms" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">利用規約</a> |
+      <a href="/disclaimer" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">免責事項</a> |
+      <a href="/copyright-policy" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">著作権ポリシー</a> |
+      <a href="https://x.com/urapost_info" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-500">お問い合わせ</a>
+    </p>
+  </footer>
 </div>
 
 <script>

@@ -600,6 +600,129 @@ def build_ranking(serialized, key, count):
 # 扱うため、他のJSONファイル(videos.json等)と違い read-modify-write をロックで保護する。
 CREATORS_LOCK = threading.Lock()
 
+# ---------- 週間ランキング特典(上位投稿者への自動ボーナスポイント) ----------
+# 「完全自動で無条件に付与」だと、①ポイント制度は運営の最終承認が必須という
+# creator-terms.htmlの規定と食い違う、②順位を争う仕組みは閲覧数の水増し動機を
+# 強めるため不正検知の余地を残したい、という2つの理由から、「週が終わるたびに
+# 自動で対象者を計算してpending状態で貯めておき、管理者がワンクリックで承認したら
+# 実際にポイントが付与される」という設計にしてある(cron等の外部スケジューラは
+# 使わず、管理者が/adminを開いたタイミングで未確定の週をまとめて確定させる)。
+RANKING_BONUS_POINTS = [5000, 3000, 1000]  # 1位/2位/3位。上位に入る人数はこの配列の長さで決まる
+RANKING_BONUSES_PATH = os.path.join(UPLOAD_DIR, "ranking_bonuses.json")
+RANKING_BONUSES_LOCK = threading.Lock()
+
+
+def get_week_start(d):
+    """dが属する週の月曜日(date型)を返す(月曜始まり)。"""
+    return d - datetime.timedelta(days=d.weekday())
+
+
+def sum_views_for_week(video, week_start_str):
+    """week_start_str(月曜, "YYYY-MM-DD")を起点とした7日間のdaily_views合計を返す。
+
+    sum_recent_viewsと違い「今日から遡ってN日」ではなく、過去の特定の週(既に終わった
+    月曜〜日曜)を指定して集計するための版。週間ランキング特典の確定処理専用。
+    """
+    daily_views = video.get("daily_views") or {}
+    week_start_date = datetime.date.fromisoformat(week_start_str)
+    total = 0
+    for i in range(7):
+        day_str = (week_start_date + datetime.timedelta(days=i)).isoformat()
+        total += daily_views.get(day_str, 0)
+    return total
+
+
+def load_ranking_bonuses():
+    if not os.path.exists(RANKING_BONUSES_PATH):
+        return {"lastFinalizedWeekStart": None, "entries": []}
+    with open(RANKING_BONUSES_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_ranking_bonuses(data):
+    with open(RANKING_BONUSES_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def _finalize_one_ranking_week(data, week_start):
+    """1つの週(月曜date)分を確定し、上位投稿者のpendingエントリをdataに追加する。
+
+    集計対象は「投稿者が所有し、現在も実体ファイルが存在する投稿」のみ(当時unlisted/
+    suspendedだったかまでは遡らず、現在の状態で代用する)。投稿者ごとに、その週で
+    一番閲覧された投稿のスコアだけを採用し(同じ投稿者の複数投稿が重複して上位を
+    独占しないように)、投稿者単位でランキングを作る。
+    """
+    week_start_str = week_start.isoformat()
+    week_end_str = (week_start + datetime.timedelta(days=6)).isoformat()
+
+    videos_list = load_videos()
+    best_by_creator = {}
+    for v in videos_list:
+        owner_id = v.get("owner_creator_id")
+        if not owner_id or not video_file_path(v):
+            continue
+        score = sum_views_for_week(v, week_start_str)
+        if score > 0 and score > best_by_creator.get(owner_id, 0):
+            best_by_creator[owner_id] = score
+
+    ranked = sorted(best_by_creator.items(), key=lambda x: x[1], reverse=True)
+    for rank, (creator_id, score) in enumerate(ranked[:len(RANKING_BONUS_POINTS)], start=1):
+        data.setdefault("entries", []).append({
+            "id": secrets.token_urlsafe(9),
+            "weekStart": week_start_str,
+            "weekEnd": week_end_str,
+            "creatorId": creator_id,
+            "rank": rank,
+            "score": score,
+            "points": RANKING_BONUS_POINTS[rank - 1],
+            "status": "pending",
+            "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "resolvedAt": None,
+        })
+
+
+def finalize_pending_ranking_weeks():
+    """今週より前の、まだ確定していない週をすべて確定させる。
+
+    管理者が/adminを開くたびに軽く呼ぶ想定(cron等の外部スケジューラは使わない)。
+    初回呼び出し時(lastFinalizedWeekStart未設定)は、過去に遡って一気に大量付与
+    してしまわないよう、「今週」を起点として記録するだけに留め、確定はしない。
+    """
+    today_week_start = get_week_start(datetime.date.today())
+
+    with RANKING_BONUSES_LOCK:
+        data = load_ranking_bonuses()
+        last = data.get("lastFinalizedWeekStart")
+        if not last:
+            data["lastFinalizedWeekStart"] = today_week_start.isoformat()
+            save_ranking_bonuses(data)
+            return
+
+        next_week_start = datetime.date.fromisoformat(last) + datetime.timedelta(days=7)
+        changed = False
+        while next_week_start < today_week_start:
+            _finalize_one_ranking_week(data, next_week_start)
+            data["lastFinalizedWeekStart"] = next_week_start.isoformat()
+            next_week_start += datetime.timedelta(days=7)
+            changed = True
+
+        if changed:
+            save_ranking_bonuses(data)
+
+
+def apply_ranking_bonus(entry, creator):
+    """週間ランキング特典1件を承認し、ポイントを付与する。呼び出し側でCREATORS_LOCKの
+    取得・save_creatorsを行うこと。"""
+    amount = entry["points"]
+    creator["points_balance"] = creator.get("points_balance", 0) + amount
+    creator.setdefault("points_history", []).append({
+        "delta": amount,
+        "reason": "ranking_bonus",
+        "rank": entry["rank"],
+        "weekStart": entry["weekStart"],
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
 # ---------- DMCA/著作権侵害の申し立て(/copyright-policy のフォーム) ----------
 # 広告ネットワーク(ExoClick)の審査要件で、2257準拠声明に加えて「専用のメールアドレスまたは
 # 問い合わせフォーム」が必須とされたため、SNS(X)のDMだけだった連絡手段をこのフォームに変更した。
@@ -1647,6 +1770,10 @@ class Handler(BaseHTTPRequestHandler):
             # 実際はログイン成功しているのに古いログイン画面が表示され続ける不具合の原因になる)。
             no_cache_headers = {"Cache-Control": "no-store"}
             if self.is_authenticated():
+                # cron等を使わない設計なので、管理者が管理画面を開いたこのタイミングで
+                # 「前回確定した週より後、今週より前」の週を軽くチェックし、未確定分が
+                # あればまとめて確定させる(週間ランキング特典のpendingエントリ生成)。
+                finalize_pending_ranking_weeks()
                 self.serve_file(os.path.join(BASE_DIR, "admin.html"), "text/html; charset=utf-8", no_cache_headers)
             else:
                 self.serve_file(os.path.join(BASE_DIR, "admin-login.html"), "text/html; charset=utf-8", no_cache_headers)
@@ -1749,6 +1876,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_list_creators()
+        elif path == "/api/ranking-bonuses":
+            if self.require_auth():
+                return
+            self.handle_list_ranking_bonuses()
         elif path == "/api/creators/me":
             if self.require_creator_auth():
                 return
@@ -2569,6 +2700,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.require_auth():
                 return
             self.handle_set_creator_pickup_featured()
+        elif path == "/api/ranking-bonuses/resolve":
+            if self.require_auth():
+                return
+            self.handle_resolve_ranking_bonus()
         elif path == "/api/creators/invite":
             if self.require_auth():
                 return
@@ -4306,6 +4441,75 @@ class Handler(BaseHTTPRequestHandler):
             save_creators(creators)
 
         self.respond_json(200, {"ok": True, "featured": creator["pickup_featured"]})
+
+    def handle_list_ranking_bonuses(self):
+        """週間ランキング特典の一覧(管理者専用)。承認待ちが上に来るよう並べて返す。"""
+        creators = load_creators()
+        with RANKING_BONUSES_LOCK:
+            data = load_ranking_bonuses()
+        # 新しい週が上、同じ週の中では順位(1位が上)の順。安定ソートなので、
+        # 優先度が低いキーから順に適用する(最後に適用したweekStartが最優先になる)。
+        entries = list(data.get("entries") or [])
+        entries.sort(key=lambda e: e["rank"])
+        entries.sort(key=lambda e: e["weekStart"], reverse=True)
+
+        self.respond_json(200, {
+            "items": [
+                {
+                    "id": e["id"],
+                    "weekStart": e["weekStart"],
+                    "weekEnd": e["weekEnd"],
+                    "creatorId": e["creatorId"],
+                    "creatorDisplayName": (find_creator(creators, e["creatorId"]) or {}).get("display_name"),
+                    "rank": e["rank"],
+                    "score": e["score"],
+                    "points": e["points"],
+                    "status": e["status"],
+                }
+                for e in entries
+            ],
+        })
+
+    def handle_resolve_ranking_bonus(self):
+        """週間ランキング特典1件を承認/却下する(管理者専用)。承認時のみポイントが付与される。"""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0 or content_length > 1_000:
+            self.respond_json(400, {"ok": False, "error": "invalid_request"})
+            return
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.respond_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        entry_id = data.get("id")
+        action = data.get("action")
+        if action not in ("approve", "reject"):
+            self.respond_json(400, {"ok": False, "error": "invalid_action"})
+            return
+
+        with RANKING_BONUSES_LOCK:
+            bonuses = load_ranking_bonuses()
+            entry = next((e for e in bonuses.get("entries") or [] if e["id"] == entry_id), None)
+            if not entry or entry["status"] != "pending":
+                self.respond_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            if action == "approve":
+                with CREATORS_LOCK:
+                    creators = load_creators()
+                    creator = find_creator(creators, entry["creatorId"])
+                    if not creator:
+                        self.respond_json(404, {"ok": False, "error": "creator_not_found"})
+                        return
+                    apply_ranking_bonus(entry, creator)
+                    save_creators(creators)
+
+            entry["status"] = "approved" if action == "approve" else "rejected"
+            entry["resolvedAt"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_ranking_bonuses(bonuses)
+
+        self.respond_json(200, {"ok": True, "status": entry["status"]})
 
     def handle_creators_invite(self):
         content_length = int(self.headers.get("Content-Length", 0))

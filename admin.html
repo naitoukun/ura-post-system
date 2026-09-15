@@ -110,6 +110,15 @@
   </form>
 
   <div>
+    <h2 class="text-lg font-bold text-slate-800">週間ランキング特典</h2>
+    <p class="text-xs text-slate-400 mt-1">その週(月曜〜日曜)の閲覧数で上位だった投稿者へのボーナスポイントです。週が終わるたびに自動で対象者が計算され、ここに承認待ちとして表示されます。承認するまでポイントは付与されません。</p>
+  </div>
+
+  <div id="rankingBonusListBox" class="flex flex-col gap-3">
+    <div class="card rounded-2xl p-4 text-sm text-slate-500">読み込み中…</div>
+  </div>
+
+  <div>
     <h2 class="text-lg font-bold text-slate-800">アップロード済み動画</h2>
     <p class="text-xs text-slate-400 mt-1">動画ごとのシェア用リンクです。</p>
   </div>
@@ -434,6 +443,7 @@
   const videoListMoreBtn = document.getElementById('videoListMoreBtn');
   const approveAllPointsBtn = document.getElementById('approveAllPointsBtn');
   const approveAllPointsMsg = document.getElementById('approveAllPointsMsg');
+  const rankingBonusListBox = document.getElementById('rankingBonusListBox');
 
   const linkStatusBox = document.getElementById('linkStatusBox');
   const linkForm      = document.getElementById('linkForm');
@@ -496,6 +506,7 @@
   });
 
   refreshVideoList();
+  refreshRankingBonuses();
   refreshLinkStatus();
   refreshAdsStatus();
   refreshContentPageAdStatus();
@@ -1593,6 +1604,118 @@
     row.appendChild(btnGroup);
 
     return row;
+  }
+
+  function refreshRankingBonuses() {
+    fetch('/api/ranking-bonuses', { cache: 'no-store' })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200) {
+          renderRankingBonuses(data.items || []);
+        } else {
+          rankingBonusListBox.innerHTML =
+            '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+        }
+      })
+      .catch(() => {
+        rankingBonusListBox.innerHTML =
+          '<div class="card rounded-2xl p-4 text-sm text-rose-500">一覧の取得に失敗しました。</div>';
+      });
+  }
+
+  function renderRankingBonuses(items) {
+    // 承認待ちが無い週(確定前、または対象者が1人もいなかった週)は表示するものが無いので、
+    // 直近に確定した週で承認待ちが1件も無ければ「今は無い」表示にする。
+    if (!items.length) {
+      rankingBonusListBox.innerHTML =
+        '<div class="card rounded-2xl p-4 text-sm text-slate-500">まだ確定した週がありません(週が終わると自動で対象者が出ます)。</div>';
+      return;
+    }
+
+    rankingBonusListBox.innerHTML = '';
+    items.forEach((item) => {
+      rankingBonusListBox.appendChild(buildRankingBonusRow(item));
+    });
+  }
+
+  const RANKING_BONUS_STATUS_LABEL = {
+    pending: { text: '承認待ち', tone: 'bg-amber-50 text-amber-700' },
+    approved: { text: '承認済み', tone: 'bg-teal-50 text-teal-700' },
+    rejected: { text: '却下', tone: 'bg-slate-100 text-slate-500' },
+  };
+
+  function buildRankingBonusRow(item) {
+    const card = document.createElement('div');
+    card.className = 'card rounded-2xl p-4 flex items-center justify-between gap-3 text-sm';
+
+    const left = document.createElement('div');
+    left.className = 'flex flex-col gap-1';
+
+    const title = document.createElement('p');
+    title.className = 'text-slate-700 font-medium';
+    title.textContent = item.weekStart + '〜' + item.weekEnd + '　'
+      + (item.creatorDisplayName || '（名前未設定）') + '　'
+      + item.rank + '位';
+    left.appendChild(title);
+
+    const sub = document.createElement('p');
+    sub.className = 'text-xs text-slate-400';
+    sub.textContent = '週間閲覧数 ' + item.score + ' / 付与ポイント ' + item.points.toLocaleString('ja-JP');
+    left.appendChild(sub);
+
+    const statusInfo = RANKING_BONUS_STATUS_LABEL[item.status] || RANKING_BONUS_STATUS_LABEL.pending;
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'inline-block w-fit text-[11px] px-2 py-0.5 rounded-full ' + statusInfo.tone;
+    statusBadge.textContent = statusInfo.text;
+    left.appendChild(statusBadge);
+
+    card.appendChild(left);
+
+    if (item.status === 'pending') {
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'flex gap-2 shrink-0';
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.textContent = '承認する';
+      approveBtn.className = 'border border-teal-500 text-teal-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50';
+      approveBtn.addEventListener('click', () => resolveRankingBonus(item.id, 'approve', btnGroup));
+      btnGroup.appendChild(approveBtn);
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.type = 'button';
+      rejectBtn.textContent = '却下';
+      rejectBtn.className = 'border border-slate-200 text-slate-500 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-50';
+      rejectBtn.addEventListener('click', () => resolveRankingBonus(item.id, 'reject', btnGroup));
+      btnGroup.appendChild(rejectBtn);
+
+      card.appendChild(btnGroup);
+    }
+
+    return card;
+  }
+
+  function resolveRankingBonus(id, action, btnGroup) {
+    Array.from(btnGroup.querySelectorAll('button')).forEach((b) => { b.disabled = true; });
+    fetch('/api/ranking-bonuses/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, action: action }),
+    })
+      .then((res) => res.json().then((data) => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (redirectIfUnauthenticated(status)) return;
+        if (status === 200 && data.ok) {
+          refreshRankingBonuses();
+          refreshCreatorList();
+        } else {
+          Array.from(btnGroup.querySelectorAll('button')).forEach((b) => { b.disabled = false; });
+        }
+      })
+      .catch(() => {
+        Array.from(btnGroup.querySelectorAll('button')).forEach((b) => { b.disabled = false; });
+      });
   }
 
   function refreshDmcaReports() {

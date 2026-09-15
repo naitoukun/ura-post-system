@@ -2761,7 +2761,10 @@ class Handler(BaseHTTPRequestHandler):
 
         token = self.create_session()
         self.send_response(302)
-        self.send_header("Location", "/admin")
+        # クエリに毎回変わる値を付けて、ブラウザが「履歴上の同じ/adminページに戻ってきた」と
+        # 誤認して古い(ログイン前の)描画を使い回すのを防ぐ(/adminのルーティング自体は
+        # クエリを見ないため、動作には影響しない)。
+        self.send_header("Location", "/admin?login=" + secrets.token_urlsafe(6))
         self.set_session_cookie(token)
         # 使い終わったstate用Cookieは消しておく
         self.send_header(

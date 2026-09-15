@@ -120,6 +120,25 @@
         resultMsg.textContent = '通信エラーが発生しました。';
       });
   });
+
+  // Googleログインは他サイト(accounts.google.com)を経由する分、タブがバックグラウンドの
+  // 間にリダイレクトが完了することがある。その状態だとブラウザが画面の再描画を後回しに
+  // することがあり、実際はログイン成功しているのにこのログイン画面のまま止まって見える
+  // ことがある。タブが再び前面に来たタイミングで、念のため実際のログイン状態を確認し、
+  // もし既にログイン済みなら(admin.html側にしかない文言で判定)読み込み直す保険を入れる。
+  function recheckIfActuallyLoggedIn() {
+    if (document.visibilityState !== 'visible') return;
+    fetch('/admin', { credentials: 'same-origin', cache: 'no-store' })
+      .then((res) => res.text())
+      .then((text) => {
+        if (text.includes('id="logoutBtn"')) {
+          location.reload();
+        }
+      })
+      .catch(() => {});
+  }
+  document.addEventListener('visibilitychange', recheckIfActuallyLoggedIn);
+  window.addEventListener('pageshow', recheckIfActuallyLoggedIn);
 })();
 </script>
 

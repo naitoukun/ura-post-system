@@ -607,7 +607,7 @@ CREATORS_LOCK = threading.Lock()
 # 自動で対象者を計算してpending状態で貯めておき、管理者がワンクリックで承認したら
 # 実際にポイントが付与される」という設計にしてある(cron等の外部スケジューラは
 # 使わず、管理者が/adminを開いたタイミングで未確定の週をまとめて確定させる)。
-RANKING_BONUS_POINTS = [8000, 5000, 2000]  # 1位/2位/3位。上位に入る人数はこの配列の長さで決まる
+RANKING_BONUS_POINTS = [10000, 5000, 2000]  # 1位/2位/3位。上位に入る人数はこの配列の長さで決まる
 RANKING_BONUSES_PATH = os.path.join(UPLOAD_DIR, "ranking_bonuses.json")
 RANKING_BONUSES_LOCK = threading.Lock()
 

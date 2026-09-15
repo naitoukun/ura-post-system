@@ -131,7 +131,13 @@
     fetch('/admin', { credentials: 'same-origin', cache: 'no-store' })
       .then((res) => res.text())
       .then((text) => {
-        if (text.includes('id="logoutBtn"')) {
+        // 文字列としてそのまま検索すると、このスクリプト自身のソースコード中に
+        // 判定用の文字列リテラルが書かれている関係で、未ログイン状態のこのページ
+        // (admin-login.html)自身を取得した場合にも誤ってマッチしてしまい、
+        // 「ログイン済みだと誤認→reload→また誤認」の無限ループになる(実際に発生した
+        // 不具合)。DOMとして解析し、実際にその要素が存在するかで判定する。
+        const doc = new DOMParser().parseFromString(text, 'text/html');
+        if (doc.getElementById('logoutBtn')) {
           location.reload();
         }
       })

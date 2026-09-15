@@ -1641,10 +1641,15 @@ class Handler(BaseHTTPRequestHandler):
             # 動画アンロックページへの直接アクセス用（?v=無しでも常にアプリを表示）
             self.handle_serve_unlock_page(parse_qs(split.query))
         elif path == "/admin" or path == "/admin.html":
+            # ログイン状態によって同じURLの中身が変わるページなので、キャッシュ制御を
+            # 明示しておかないと、ブラウザがログイン前のadmin-login.htmlをキャッシュした
+            # ままにしてしまうことがある(特にGoogleログインのリダイレクトで戻ってきた直後、
+            # 実際はログイン成功しているのに古いログイン画面が表示され続ける不具合の原因になる)。
+            no_cache_headers = {"Cache-Control": "no-store"}
             if self.is_authenticated():
-                self.serve_file(os.path.join(BASE_DIR, "admin.html"), "text/html; charset=utf-8")
+                self.serve_file(os.path.join(BASE_DIR, "admin.html"), "text/html; charset=utf-8", no_cache_headers)
             else:
-                self.serve_file(os.path.join(BASE_DIR, "admin-login.html"), "text/html; charset=utf-8")
+                self.serve_file(os.path.join(BASE_DIR, "admin-login.html"), "text/html; charset=utf-8", no_cache_headers)
         elif path == "/admin/totp-setup":
             # サーバーの実際のTOTP_SECRETはここでは一切扱わない。
             # 入力された値をブラウザ内だけでQRコード化する単なるツール。

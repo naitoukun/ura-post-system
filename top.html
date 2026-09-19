@@ -190,8 +190,10 @@
        中身がまだ空の<ins>がflexアイテムとして幅0に潰れてしまい、Responsive設定の
        動画が「幅0の枠」に描画しようとして永久に表示されない(姉妹サイトでも同じ原因で
        同様の不具合があった)。枠をブロック要素にしてmax-widthで幅の上限だけ決め、
-       <ins>側にwidth:100%を明示することで幅を確定させる(高さはaspect-videoで確保)。 -->
-  <div id="topNewArrivalsAdWrap" class="hidden-el w-full max-w-[760px] mx-auto aspect-video"></div>
+       <ins>側にwidth:100%を明示することで幅を確定させる(高さはaspect-videoで確保)。
+       実際に配信されたクリエイティブが16:9より縦長で、枠からはみ出して直後の見出しに
+       被さる事例があったため、overflow-hiddenではみ出た分を隠す。 -->
+  <div id="topNewArrivalsAdWrap" class="hidden-el w-full max-w-[760px] mx-auto aspect-video overflow-hidden"></div>
 
   <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
 

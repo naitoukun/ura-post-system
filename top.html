@@ -185,12 +185,13 @@
     <div id="monthlyRankingGrid" class="grid grid-cols-3 gap-2 md:grid-cols-5"></div>
   </div>
 
-  <!-- 新着一覧の直前に置くバナー広告(ExoClick)。当初はOutstream Videoを試したが、
-       新規ゾーンはもちろん、稼働実績のあるエログラ側の同形式ゾーンでも広告枠の高さが
-       0のままで全く配信されていない状態が続いていた(このアドネットワーク側でOutstream
-       Videoのフィルが弱いとみられる)。収益実績のあるバナー形式(topAdWrapと同じ、
-       PC/スマホでゾーンを分ける方式)に切り替えた。 -->
-  <div id="topNewArrivalsAdWrap" class="hidden-el w-full flex justify-center"></div>
+  <!-- 新着一覧の直前に置くOutstream Video広告(ExoClick)。以前この枠は
+       "hidden-el w-full flex justify-center"(flexで中央寄せ)にしていたが、これだと
+       中身がまだ空の<ins>がflexアイテムとして幅0に潰れてしまい、Responsive設定の
+       動画が「幅0の枠」に描画しようとして永久に表示されない(姉妹サイトでも同じ原因で
+       同様の不具合があった)。枠をブロック要素にしてmax-widthで幅の上限だけ決め、
+       <ins>側にwidth:100%を明示することで幅を確定させる(高さはaspect-videoで確保)。 -->
+  <div id="topNewArrivalsAdWrap" class="hidden-el w-full max-w-[760px] mx-auto aspect-video"></div>
 
   <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
 
@@ -404,14 +405,16 @@
   }
   loadTopAd();
 
-  // 新着一覧の直前に置くバナー広告(ExoClick)。topAdWrapと同じくPC/スマホでゾーンID・
-  // タグを分ける方式。
+  // 新着一覧の直前に置くOutstream Video広告(ExoClick)。ゾーン側でMaximum Width:
+  // Responsiveにしてあるため、バナー広告と違いPC/スマホでゾーンを分ける必要がない。
+  // <ins>自体に幅を明示しないと親のブロック要素の中で幅0のまま描画されないため、
+  // display:block; width:100%を直接指定する。
   function loadTopNewArrivalsAd() {
-    const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
-    const zoneId = isDesktopAd ? '6034306' : '6034308';
     const ins = document.createElement('ins');
-    ins.className = isDesktopAd ? 'eas6a97888e2' : 'eas6a97888e10';
-    ins.setAttribute('data-zoneid', zoneId);
+    ins.className = 'eas6a97888e37';
+    ins.setAttribute('data-zoneid', '6034258');
+    ins.style.display = 'block';
+    ins.style.width = '100%';
     topNewArrivalsAdWrap.innerHTML = '';
     topNewArrivalsAdWrap.appendChild(ins);
     topNewArrivalsAdWrap.classList.remove('hidden-el');

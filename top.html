@@ -167,10 +167,10 @@
     </div>
   </div>
 
-  <!-- 週間ランキングの直前に置くOutstream Video広告(ExoClick)。新着直前で使っていたのと
-       同じゾーン(高さを明示しないと可視性判定が働かず配信されないことが分かっている)を、
-       場所を変えて再利用している。ゾーン名もtop_weekly_ranking_outstreamに変更済み。 -->
-  <div id="topWeeklyRankingAdWrap" class="hidden-el w-full max-w-md mx-auto aspect-video flex justify-center"></div>
+  <!-- 週間ランキングの直前に置くバナー広告(ExoClick)。ここも当初はOutstream Videoの
+       ゾーンを置いていたが、場所を変えても配信ゼロのままだったため(このアカウントの
+       Outstream Video自体がほぼ機能していない)、新着直前と同じくバナー形式に切り替えた。 -->
+  <div id="topWeeklyRankingAdWrap" class="hidden-el w-full flex justify-center"></div>
 
   <!-- 週間/月間ランキング。直近7日/30日の有効視聴数(水増し対策済みのview_countと同じ
        基準)が多い順。0件の投稿だけになった場合はサーバー側で除外済みなので、
@@ -419,12 +419,14 @@
   }
   loadTopNewArrivalsAd();
 
-  // 週間ランキングの直前に置くOutstream Video広告(ExoClick)。ゾーン側でMaximum Width:
-  // Responsiveにしてあるため、バナー広告と違いPC/スマホでゾーンを分ける必要がない。
+  // 週間ランキングの直前に置くバナー広告(ExoClick)。topAdWrap/topNewArrivalsAdWrapと
+  // 同じくPC/スマホでゾーンID・タグを分ける方式。
   function loadTopWeeklyRankingAd() {
+    const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
+    const zoneId = isDesktopAd ? '6034326' : '6034328';
     const ins = document.createElement('ins');
-    ins.className = 'eas6a97888e37';
-    ins.setAttribute('data-zoneid', '6034258');
+    ins.className = isDesktopAd ? 'eas6a97888e2' : 'eas6a97888e10';
+    ins.setAttribute('data-zoneid', zoneId);
     topWeeklyRankingAdWrap.innerHTML = '';
     topWeeklyRankingAdWrap.appendChild(ins);
     topWeeklyRankingAdWrap.classList.remove('hidden-el');

@@ -167,6 +167,11 @@
     </div>
   </div>
 
+  <!-- 週間ランキングの直前に置くOutstream Video広告(ExoClick)。新着直前で使っていたのと
+       同じゾーン(高さを明示しないと可視性判定が働かず配信されないことが分かっている)を、
+       場所を変えて再利用している。ゾーン名もtop_weekly_ranking_outstreamに変更済み。 -->
+  <div id="topWeeklyRankingAdWrap" class="hidden-el w-full max-w-md mx-auto aspect-video flex justify-center"></div>
+
   <!-- 週間/月間ランキング。直近7日/30日の有効視聴数(水増し対策済みのview_countと同じ
        基準)が多い順。0件の投稿だけになった場合はサーバー側で除外済みなので、
        枠自体が空になる場合は非表示にする。 -->
@@ -237,6 +242,7 @@
   const loadMoreSentinel = document.getElementById('loadMoreSentinel');
   const topAdWrap = document.getElementById('topAdWrap');
   const topNewArrivalsAdWrap = document.getElementById('topNewArrivalsAdWrap');
+  const topWeeklyRankingAdWrap = document.getElementById('topWeeklyRankingAdWrap');
   const feedHeading = document.getElementById('feedHeading');
   const searchInput = document.getElementById('searchInput');
   const typeFilterBtns = Array.from(document.querySelectorAll('.type-filter-btn'));
@@ -412,6 +418,19 @@
     (window.AdProvider = window.AdProvider || []).push({ serve: {} });
   }
   loadTopNewArrivalsAd();
+
+  // 週間ランキングの直前に置くOutstream Video広告(ExoClick)。ゾーン側でMaximum Width:
+  // Responsiveにしてあるため、バナー広告と違いPC/スマホでゾーンを分ける必要がない。
+  function loadTopWeeklyRankingAd() {
+    const ins = document.createElement('ins');
+    ins.className = 'eas6a97888e37';
+    ins.setAttribute('data-zoneid', '6034258');
+    topWeeklyRankingAdWrap.innerHTML = '';
+    topWeeklyRankingAdWrap.appendChild(ins);
+    topWeeklyRankingAdWrap.classList.remove('hidden-el');
+    (window.AdProvider = window.AdProvider || []).push({ serve: {} });
+  }
+  loadTopWeeklyRankingAd();
 
   // 無限スクロール。offsetを進めながら/api/top-postsを叩き、末尾に追記していく。
   let offset = 0;

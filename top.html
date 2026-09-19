@@ -432,13 +432,15 @@
       // min-heightはクリエイティブ読み込み前の可視性判定用の仮置きなので、実際の
       // クリエイティブが入ったら外す。外さないままだと、min-heightより低い
       // クリエイティブが来た場合に下に余白が残ってしまう。
+      // 広告スクリプトが実際のクリエイティブを<ins>の子孫として挿入するのか、
+      // <ins>と兄弟関係で枠(topNewArrivalsAdWrap)側に挿入するのかは確証が持てない
+      // ため、枠全体をsubtree付きで監視し、配下で何か変化があるたびにmin-heightを
+      // 解除する(解除自体は「下限を外す」だけなので、早すぎても実害はない)。
       const observer = new MutationObserver(() => {
-        if (ins.children.length > 0) {
-          topNewArrivalsAdWrap.style.minHeight = '';
-          observer.disconnect();
-        }
+        topNewArrivalsAdWrap.style.minHeight = '';
       });
-      observer.observe(ins, { childList: true });
+      observer.observe(topNewArrivalsAdWrap, { childList: true, subtree: true });
+      setTimeout(() => observer.disconnect(), 8000);
     }
 
     topNewArrivalsAdWrap.innerHTML = '';

@@ -428,6 +428,17 @@
       ins.setAttribute('data-zoneid', '6034258');
       ins.style.display = 'block';
       ins.style.width = '100%';
+
+      // min-heightはクリエイティブ読み込み前の可視性判定用の仮置きなので、実際の
+      // クリエイティブが入ったら外す。外さないままだと、min-heightより低い
+      // クリエイティブが来た場合に下に余白が残ってしまう。
+      const observer = new MutationObserver(() => {
+        if (ins.children.length > 0) {
+          topNewArrivalsAdWrap.style.minHeight = '';
+          observer.disconnect();
+        }
+      });
+      observer.observe(ins, { childList: true });
     }
 
     topNewArrivalsAdWrap.innerHTML = '';

@@ -180,6 +180,11 @@
     <div id="monthlyRankingGrid" class="grid grid-cols-3 gap-2 md:grid-cols-5"></div>
   </div>
 
+  <!-- 新着一覧の直前に置くOutstream Video広告(ExoClick)。画面内に入ったら自動ミュート再生、
+       画面外で一時停止するタイプ。幅はゾーン側でResponsive設定済みなので、PC/スマホで
+       ゾーンを分ける必要がなく、他のバナー広告と違って1つのゾーンIDで済む。 -->
+  <div id="topOutstreamAdWrap" class="hidden-el w-full flex justify-center"></div>
+
   <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
 
   <div id="loadingText" class="text-sm text-slate-400">読み込み中…</div>
@@ -229,6 +234,7 @@
   const monthlyRankingGrid = document.getElementById('monthlyRankingGrid');
   const loadMoreSentinel = document.getElementById('loadMoreSentinel');
   const topAdWrap = document.getElementById('topAdWrap');
+  const topOutstreamAdWrap = document.getElementById('topOutstreamAdWrap');
   const feedHeading = document.getElementById('feedHeading');
   const searchInput = document.getElementById('searchInput');
   const typeFilterBtns = Array.from(document.querySelectorAll('.type-filter-btn'));
@@ -389,6 +395,19 @@
     (window.AdProvider = window.AdProvider || []).push({ serve: {} });
   }
   loadTopAd();
+
+  // 新着一覧の直前に置くOutstream Video広告(ExoClick)。ゾーン側でMaximum Width:
+  // Responsiveにしてあるため、バナー広告と違いPC/スマホでゾーンを分ける必要がない。
+  function loadTopOutstreamAd() {
+    const ins = document.createElement('ins');
+    ins.className = 'eas6a97888e37';
+    ins.setAttribute('data-zoneid', '6034258');
+    topOutstreamAdWrap.innerHTML = '';
+    topOutstreamAdWrap.appendChild(ins);
+    topOutstreamAdWrap.classList.remove('hidden-el');
+    (window.AdProvider = window.AdProvider || []).push({ serve: {} });
+  }
+  loadTopOutstreamAd();
 
   // 無限スクロール。offsetを進めながら/api/top-postsを叩き、末尾に追記していく。
   let offset = 0;

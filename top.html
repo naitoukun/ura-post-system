@@ -185,16 +185,13 @@
     <div id="monthlyRankingGrid" class="grid grid-cols-3 gap-2 md:grid-cols-5"></div>
   </div>
 
-  <!-- 新着一覧の直前に置くOutstream Video広告(ExoClick)。以前この枠は
-       "hidden-el w-full flex justify-center"(flexで中央寄せ)にしていたが、これだと
-       中身がまだ空の<ins>がflexアイテムとして幅0に潰れてしまい、Responsive設定の
-       動画が「幅0の枠」に描画しようとして永久に表示されない(姉妹サイトでも同じ原因で
-       同様の不具合があった)。枠をブロック要素にしてmax-widthで幅の上限だけ決め、
-       <ins>側にwidth:100%を明示することで幅を確定させる。
-       高さをaspect-video(16:9固定)にしたところ、配信されたクリエイティブがそれより
-       縦長だった際にoverflow-hiddenで下側が見切れてしまったため、高さは固定せずmin-height
-       (読み込み前の可視性判定用に最低限だけ確保)にして、中身に応じて枠ごと伸びるようにする。 -->
-  <div id="topNewArrivalsAdWrap" class="hidden-el w-full max-w-[760px] mx-auto" style="min-height:428px;"></div>
+  <!-- 新着一覧の直前に置く広告(ExoClick)。スマホは縦長のOutstream Video、PCはバナー。
+       理由: このゾーンで配信される動画クリエイティブは縦長(TikTok風)のものが多く、
+       PCの760px幅の枠に入れると間延びして見た目が悪い。スマホなら画面幅自体が狭いので
+       違和感が少ない一方、PCは実績のあるバナー形式にしておく。クラス/スタイルは
+       フォーマットごとに中身が異なる(動画はブロック要素+min-height、バナーは
+       topAdWrapと同じflex中央寄せ)ため、JS側で組み立てる。 -->
+  <div id="topNewArrivalsAdWrap" class="hidden-el w-full"></div>
 
   <p id="feedHeading" class="btn-primary text-base font-bold text-center rounded-xl py-2.5 shadow-sm">🆕 新着 🆕</p>
 
@@ -408,16 +405,31 @@
   }
   loadTopAd();
 
-  // 新着一覧の直前に置くOutstream Video広告(ExoClick)。ゾーン側でMaximum Width:
-  // Responsiveにしてあるため、バナー広告と違いPC/スマホでゾーンを分ける必要がない。
-  // <ins>自体に幅を明示しないと親のブロック要素の中で幅0のまま描画されないため、
-  // display:block; width:100%を直接指定する。
+  // 新着一覧の直前に置く広告(ExoClick)。スマホは縦長のOutstream Video、PCはバナー
+  // (PCの横長の枠に縦長動画を入れると間延びするため)。
   function loadTopNewArrivalsAd() {
+    const isDesktopAd = window.matchMedia(CONTENT_PAGE_AD_DESKTOP_QUERY).matches;
     const ins = document.createElement('ins');
-    ins.className = 'eas6a97888e37';
-    ins.setAttribute('data-zoneid', '6034258');
-    ins.style.display = 'block';
-    ins.style.width = '100%';
+
+    if (isDesktopAd) {
+      // PC: バナー(topAdWrapと同じ、flexで中央寄せ)
+      topNewArrivalsAdWrap.className = 'hidden-el w-full flex justify-center';
+      ins.className = 'eas6a97888e2';
+      ins.setAttribute('data-zoneid', '6034306');
+    } else {
+      // スマホ: Outstream Video。<ins>に幅を明示しないと親の中で幅0のまま描画されない
+      // (Responsive設定の動画は「幅0の枠」には描画されない)ため、display:block;
+      // width:100%を直接指定する。高さは固定せずmin-height(可視性判定用の最低限)
+      // だけ確保し、中身に応じて枠ごと伸びるようにする(縦長クリエイティブでも
+      // 見切れたり下の見出しに被ったりしない)。
+      topNewArrivalsAdWrap.className = 'hidden-el w-full max-w-[760px] mx-auto';
+      topNewArrivalsAdWrap.style.minHeight = '428px';
+      ins.className = 'eas6a97888e37';
+      ins.setAttribute('data-zoneid', '6034258');
+      ins.style.display = 'block';
+      ins.style.width = '100%';
+    }
+
     topNewArrivalsAdWrap.innerHTML = '';
     topNewArrivalsAdWrap.appendChild(ins);
     topNewArrivalsAdWrap.classList.remove('hidden-el');

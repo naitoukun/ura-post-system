@@ -227,17 +227,6 @@
       <input type="url" name="contactUrl" placeholder="https://x.com/..."
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
     </label>
-    <div class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">アカウント形式</span>
-      <label class="flex items-center gap-1.5 text-sm text-slate-700">
-        <input type="radio" name="authMode" value="password" checked class="w-4 h-4" />
-        フル版（ログインコード＋パスワード、ポイント制度あり）
-      </label>
-      <label class="flex items-center gap-1.5 text-sm text-slate-700">
-        <input type="radio" name="authMode" value="magic_link" class="w-4 h-4" />
-        ライト版（リンクのみ・登録不要、報酬は個別対応）
-      </label>
-    </div>
     <button type="submit" id="inviteSubmitBtn" class="btn-primary rounded-lg py-2.5 text-sm font-bold">
       招待URLを発行する
     </button>
@@ -728,7 +717,6 @@
     inviteSubmitBtn.disabled = true;
 
     const formData = new FormData(inviteForm);
-    const authMode = formData.get('authMode') || 'password';
 
     fetch('/api/creators/invite', {
       method: 'POST',
@@ -736,7 +724,6 @@
       body: JSON.stringify({
         displayName: formData.get('displayName'),
         contactUrl: formData.get('contactUrl'),
-        authMode: authMode,
       }),
     })
       .then((res) => res.json().then((data) => ({ status: res.status, data })))
@@ -758,9 +745,7 @@
 
           const label = document.createElement('p');
           label.className = 'text-xs text-slate-500';
-          label.textContent = authMode === 'magic_link'
-            ? '↑このリンク自体が本人の恒久的なログイン手段です（パスワード不要・何度でも使えます）'
-            : '↑招待URL（初回登録用）。ログインコード: ' + data.loginCode + '（登録後も本人はこれを使ってログインします）';
+          label.textContent = '↑招待URL（初回登録用）。ログインコード: ' + data.loginCode + '（登録後も本人はこれを使ってログインします）';
           inviteResultBox.appendChild(label);
 
           inviteForm.reset();
@@ -980,19 +965,14 @@
     const idBadge = idBadgeMap[creator.idVerificationStatus] || idBadgeMap.not_submitted;
     addBadge(idBadge[0], idBadge[1]);
 
-    const isMagicLink = creator.authMode === 'magic_link';
-    if (isMagicLink) {
-      addBadge('ライト版', 'bg-sky-50 text-sky-700');
-    } else {
-      addBadge('残高: ' + (creator.pointsBalance || 0).toLocaleString('ja-JP') + 'pt（' + (creator.pointsBalanceYen || 0).toLocaleString('ja-JP') + '円分）', 'bg-slate-100 text-slate-600');
+    addBadge('残高: ' + (creator.pointsBalance || 0).toLocaleString('ja-JP') + 'pt（' + (creator.pointsBalanceYen || 0).toLocaleString('ja-JP') + '円分）', 'bg-slate-100 text-slate-600');
 
-      const pendingCount = (creator.redemptionRequests || []).filter((r) => r.status === 'pending').length;
-      if (pendingCount) {
-        addBadge('交換申請 ' + pendingCount + '件', 'bg-rose-50 text-rose-600');
-      }
-      if (creator.pointsPerVideoUpload != null || creator.pointsPerImageUpload != null) {
-        addBadge('付与ポイント個別設定あり', 'bg-violet-50 text-violet-700');
-      }
+    const pendingCount = (creator.redemptionRequests || []).filter((r) => r.status === 'pending').length;
+    if (pendingCount) {
+      addBadge('交換申請 ' + pendingCount + '件', 'bg-rose-50 text-rose-600');
+    }
+    if (creator.pointsPerVideoUpload != null || creator.pointsPerImageUpload != null) {
+      addBadge('付与ポイント個別設定あり', 'bg-violet-50 text-violet-700');
     }
 
     summary.appendChild(badgeRow);
@@ -1004,38 +984,16 @@
     const codeRow = document.createElement('div');
     codeRow.className = 'flex items-center justify-between gap-2';
 
-    let resetPasswordBtn = null;
-    if (isMagicLink) {
-      const linkInput = document.createElement('input');
-      linkInput.type = 'text';
-      linkInput.readOnly = true;
-      linkInput.value = creator.magicLinkUrl || '-';
-      linkInput.className = 'flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1 text-xs bg-slate-50';
-      codeRow.appendChild(linkInput);
+    const codeText = document.createElement('p');
+    codeText.className = 'text-xs text-slate-500';
+    codeText.textContent = 'ログインコード: ' + (creator.loginCode || '-');
+    codeRow.appendChild(codeText);
 
-      const copyLinkBtn = document.createElement('button');
-      copyLinkBtn.type = 'button';
-      copyLinkBtn.textContent = 'コピー';
-      copyLinkBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
-      copyLinkBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(creator.magicLinkUrl || '').then(() => {
-          copyLinkBtn.textContent = 'コピー済み';
-          setTimeout(() => { copyLinkBtn.textContent = 'コピー'; }, 1500);
-        });
-      });
-      codeRow.appendChild(copyLinkBtn);
-    } else {
-      const codeText = document.createElement('p');
-      codeText.className = 'text-xs text-slate-500';
-      codeText.textContent = 'ログインコード: ' + (creator.loginCode || '-');
-      codeRow.appendChild(codeText);
-
-      resetPasswordBtn = document.createElement('button');
-      resetPasswordBtn.type = 'button';
-      resetPasswordBtn.textContent = 'パスワードをリセット';
-      resetPasswordBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
-      codeRow.appendChild(resetPasswordBtn);
-    }
+    const resetPasswordBtn = document.createElement('button');
+    resetPasswordBtn.type = 'button';
+    resetPasswordBtn.textContent = 'パスワードをリセット';
+    resetPasswordBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    codeRow.appendChild(resetPasswordBtn);
 
     const impersonateBtn = document.createElement('button');
     impersonateBtn.type = 'button';
@@ -1323,8 +1281,6 @@
     }
     body.appendChild(idWrap);
 
-    // 手動ポイント調整・個別上書き・交換申請はポイント制度を使わないライト版には不要
-    if (!isMagicLink) {
     // 手動ポイント調整
     const adjustWrap = document.createElement('div');
     adjustWrap.className = 'flex gap-2 items-center';
@@ -1443,7 +1399,6 @@
     });
     overrideWrap.appendChild(overrideApplyBtn);
     body.appendChild(overrideWrap);
-    }
 
     // 交換申請一覧
     const requests = creator.redemptionRequests || [];

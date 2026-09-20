@@ -1250,16 +1250,10 @@
           displayNameInput.value = data.displayName || '';
           defaultCtaTextInput.value = data.defaultCtaButtonText || '';
           defaultCtaLinkInput.value = data.defaultCtaLinkUrl || '';
-          if (data.authMode === 'magic_link') {
-            // ライト版はポイント制度を使わず、報酬は運営が個別に対応するため非表示にする
-            pointsBalanceCard.classList.add('hidden');
-            redemptionForm.classList.add('hidden');
-          } else {
-            currentBalance = data.pointsBalance || 0;
-            currentBalanceYen = data.pointsBalanceYen || 0;
-            currentRedemptions = data.redemptionRequests || [];
-            refreshPointsBox();
-          }
+          currentBalance = data.pointsBalance || 0;
+          currentBalanceYen = data.pointsBalanceYen || 0;
+          currentRedemptions = data.redemptionRequests || [];
+          refreshPointsBox();
           updateIdVerificationUI(data.idVerificationStatus, data.idRejectionReason);
         }
       })

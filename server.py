@@ -52,7 +52,6 @@
 - GET  /join/<invite_token>  招待受諾ページ。パスワードを設定してアカウントを有効化する
 - GET  /creator          クリエイター向けダッシュボード。未ログインならログイン画面
 - POST /api/creator/register  招待トークン+パスワードで登録し、セッションCookieを発行
-- POST /api/creator/magic-link-enter  ライト版(パスワード無し)。招待トークンだけで毎回セッションを発行(初回のみ規約同意が必要)
 - POST /api/creator/login  ログインコード+パスワードでログイン
 - POST /api/creator/logout
 - GET  /api/creator/content  自分がアップロードしたコンテンツの一覧(JSON、ポイント状況込み)※要クリエイターログイン
@@ -882,24 +881,7 @@ def find_creator_by_login_code(creators, login_code):
 
 def find_creator_by_invite_token(creators, invite_token):
     return next(
-        (
-            c for c in creators
-            if c.get("invite_token") == invite_token
-            and c.get("status") == "invited"
-            and c.get("auth_mode", "password") == "password"
-        ),
-        None,
-    )
-
-
-def find_creator_by_magic_link_token(creators, invite_token):
-    """マジックリンク方式(ライト版)のクリエイターを探す。
-
-    パスワード方式と違い、招待トークンは登録後も無効化されず、本人の恒久的な
-    アクセス手段として使い続ける想定のため、statusによる絞り込みは行わない。
-    """
-    return next(
-        (c for c in creators if c.get("invite_token") == invite_token and c.get("auth_mode") == "magic_link"),
+        (c for c in creators if c.get("invite_token") == invite_token and c.get("status") == "invited"),
         None,
     )
 
@@ -2642,8 +2624,6 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_resolve_dmca_report()
         elif path == "/api/creator/register":
             self.handle_creator_register()
-        elif path == "/api/creator/magic-link-enter":
-            self.handle_creator_magic_link_enter()
         elif path == "/api/creator/login":
             self.handle_creator_login()
         elif path == "/api/creator/logout":
@@ -4091,18 +4071,9 @@ class Handler(BaseHTTPRequestHandler):
         creators = load_creators()
         creator = find_creator_by_invite_token(creators, invite_token)
         if creator:
-            state = {"valid": True, "token": invite_token, "mode": "password"}
+            state = {"valid": True, "token": invite_token}
         else:
-            magic_creator = find_creator_by_magic_link_token(creators, invite_token)
-            if magic_creator:
-                state = {
-                    "valid": True,
-                    "token": invite_token,
-                    "mode": "magic_link",
-                    "alreadyAgreed": bool(magic_creator.get("terms_agreed_at")),
-                }
-            else:
-                state = {"valid": False, "token": invite_token}
+            state = {"valid": False, "token": invite_token}
 
         with open(os.path.join(BASE_DIR, "creator-join.html"), "r", encoding="utf-8") as f:
             page_html = f.read()
@@ -4165,56 +4136,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.set_creator_session_cookie(token)
         payload = json.dumps({"ok": True, "loginCode": login_code}).encode("utf-8")
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def handle_creator_magic_link_enter(self):
-        """ライト版(パスワード無し)クリエイター向け。招待リンクそのものを恒久的な
-
-        アクセス手段として使い、訪問のたびにセッションを発行する。初回訪問時のみ
-        利用規約への同意を必須にする(2回目以降は同意済みなのでスキップ)。
-        """
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length <= 0 or content_length > 2_000:
-            self.respond_json(400, {"ok": False, "error": "invalid_request"})
-            return
-
-        try:
-            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            self.respond_json(400, {"ok": False, "error": "invalid_json"})
-            return
-
-        invite_token = data.get("inviteToken") or ""
-
-        with CREATORS_LOCK:
-            creators = load_creators()
-            creator = find_creator_by_magic_link_token(creators, invite_token)
-            if not creator:
-                self.respond_json(400, {"ok": False, "error": "invalid_invite"})
-                return
-
-            if not creator.get("terms_agreed_at"):
-                if data.get("agreedToTerms") is not True:
-                    self.respond_json(400, {"ok": False, "error": "terms_not_agreed"})
-                    return
-                creator["status"] = "active"
-                creator["activated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                creator["terms_agreed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                save_creators(creators)
-                send_notification_email(
-                    "新規登録 - " + (creator.get("display_name") or "（名前未設定）"),
-                    (creator.get("display_name") or "（名前未設定）") + " さんが招待リンク(ライト版)を受諾し、アカウントが有効化されました。",
-                )
-
-            creator_id = creator["id"]
-
-        token = self.create_creator_session(creator_id)
-        self.send_response(200)
-        self.set_creator_session_cookie(token)
-        payload = json.dumps({"ok": True}).encode("utf-8")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
@@ -4313,7 +4234,6 @@ class Handler(BaseHTTPRequestHandler):
 
         self.respond_json(200, {
             "ok": True,
-            "authMode": creator.get("auth_mode", "password"),
             "displayName": creator.get("display_name"),
             "defaultCtaButtonText": creator.get("default_cta_button_text"),
             "defaultCtaLinkUrl": creator.get("default_cta_link_url"),
@@ -4388,13 +4308,7 @@ class Handler(BaseHTTPRequestHandler):
                 "id": c["id"],
                 "displayName": c.get("display_name"),
                 "status": c["status"],
-                "authMode": c.get("auth_mode", "password"),
                 "loginCode": c.get("login_code"),
-                "magicLinkUrl": (
-                    PUBLIC_SITE_URL + "/join/" + c["invite_token"]
-                    if c.get("auth_mode") == "magic_link" and c.get("invite_token")
-                    else None
-                ),
                 "pointsBalance": c.get("points_balance", 0),
                 "pointsBalanceYen": points_to_yen(c.get("points_balance", 0)),
                 "pickupFeatured": bool(c.get("pickup_featured")),
@@ -4530,8 +4444,6 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(400, {"ok": False, "error": error})
             return
 
-        auth_mode = data.get("authMode") if data.get("authMode") in ("password", "magic_link") else "password"
-
         with CREATORS_LOCK:
             creators = load_creators()
             creator = {
@@ -4539,7 +4451,6 @@ class Handler(BaseHTTPRequestHandler):
                 "display_name": display_name or None,
                 "invite_token": secrets.token_urlsafe(16),
                 "login_code": secrets.token_hex(4).upper(),
-                "auth_mode": auth_mode,
                 "status": "invited",
                 "password_salt": None,
                 "password_hash": None,

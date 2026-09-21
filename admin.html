@@ -1321,6 +1321,46 @@
         });
     });
     adjustWrap.appendChild(adjustBtn);
+
+    // 残高を0にするボタン。「ポイント調整」欄は差分(delta)指定であり0を渡しても
+    // 無効値として弾かれる(server.py側でdelta==0を拒否)ため、現在の残高を見て
+    // その場でマイナス分を計算して同じAPIに投げる専用の導線を用意する。
+    const zeroOutBtn = document.createElement('button');
+    zeroOutBtn.type = 'button';
+    zeroOutBtn.textContent = '0にする';
+    zeroOutBtn.className = 'shrink-0 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50';
+    const currentBalanceForZeroOut = creator.pointsBalance || 0;
+    if (currentBalanceForZeroOut === 0) {
+      zeroOutBtn.disabled = true;
+    }
+    zeroOutBtn.addEventListener('click', () => {
+      if (!window.confirm(
+        (creator.displayName || '（名前未設定）') + ' さんの残高を'
+        + currentBalanceForZeroOut.toLocaleString('ja-JP') + 'ptから0ptにしますか？'
+      )) return;
+
+      zeroOutBtn.disabled = true;
+      fetch('/api/creators/adjust-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: creator.id, delta: -currentBalanceForZeroOut, note: '0にする' }),
+      })
+        .then((res) => res.json().then((data) => ({ status: res.status, data })))
+        .then(({ status, data }) => {
+          if (redirectIfUnauthenticated(status)) return;
+          if (status === 200 && data.ok) {
+            refreshCreatorList();
+          } else {
+            zeroOutBtn.disabled = false;
+            alert('調整に失敗しました（' + (data.error || status) + '）');
+          }
+        })
+        .catch(() => {
+          zeroOutBtn.disabled = false;
+          alert('通信エラーが発生しました。');
+        });
+    });
+    adjustWrap.appendChild(zeroOutBtn);
     body.appendChild(adjustWrap);
 
     // 動画/画像それぞれの付与ポイントの個別上書き(空欄=既定値を使う)
